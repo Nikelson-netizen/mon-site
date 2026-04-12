@@ -1,0 +1,14 @@
+{
+  "name": "gomoku-online",
+  "version": "1.0.0",
+  "description": "Gomoku online with real players",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}

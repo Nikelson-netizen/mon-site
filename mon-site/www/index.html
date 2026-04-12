@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gomoku Online</title>
+
+  <meta name="description" content="Play Gomoku online with real players. Train your brain and strategy.">
+
+  <link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#1f2937" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Gomoku" />
+<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+  <meta property="og:title" content="Can you beat me? 🔥 Gomoku Online">
+  <meta property="og:description" content="Play Gomoku online with real players. Challenge your friends and win.">
+  <meta property="og:image" content="https://gomoku-morpion-5-online.onrender.com/logo.png">
+  <meta property="og:url" content="https://gomoku-morpion-5-online.onrender.com/">
+  <meta property="og:type" content="website">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Can you beat me? 🔥 Gomoku Online">
+  <meta name="twitter:description" content="Play Gomoku online with real players. Challenge your friends and win.">
+  <meta name="twitter:image" content="https://gomoku-morpion-5-online.onrender.com/logo.png">
+
+  <link rel="shortcut icon" href="logo.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="page-overlay">
+    <div class="container">
+
+      <header class="top-header">
+        <img src="logo.png" alt="Gomoku Logo" class="logo">
+        <h1>jeu de morpion à 5 / Gomoku 5 Five in a Row</h1>
+        <h2 id="status">Turn : Black</h2>
+      </header>
+
+      <section class="controls">
+        <div class="control-group">
+          <label for="mode">Mode</label>
+          <select id="mode">
+            <option value="pvp">2 Players</option>
+            <option value="ai">Play vs AI</option>
+            <option value="online">Online Multiplayer</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label for="aiLevel">AI Level</label>
+          <select id="aiLevel">
+            <option value="1">Level 1 - Easy</option>
+            <option value="2">Level 2</option>
+            <option value="3">Level 3</option>
+            <option value="4">Level 4</option>
+            <option value="5">Level 5 - Hard</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label for="firstPlayer">First</label>
+          <select id="firstPlayer">
+            <option value="human" selected>Human</option>
+            <option value="ai">AI</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label for="playerName">Player Name</label>
+          <input
+            id="playerName"
+            type="text"
+            placeholder="Enter your name"
+            maxlength="20"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="buttons-row">
+          <button id="fbLoginBtn">Login with Facebook</button>
+          <button id="goOnline" type="button">🔎 Find a player</button>
+          <button id="shareSiteBtn" type="button">🔗 Share Site</button>
+          <button id="reset" type="button">Restart</button>
+          <button id="leaveMatch" type="button">End Match</button>
+          <button id="challengeBtn" type="button">🔥 Challenge Me</button>
+          <button id="installBtn" style="display: none;">Install App</button>
+        </div>
+      </section>
+
+      <section id="inviteBox" class="invite-box" style="display: none;">
+        <span id="inviteText">A player wants to play with you.</span>
+        <div class="invite-actions">
+          <button id="acceptInvite" type="button" class="online-btn">Accept</button>
+          <button id="declineInvite" type="button" class="online-btn">Decline</button>
+        </div>
+      </section>
+
+      <section class="online-panel">
+  <div class="online-box collapsible-box">
+    <button class="collapse-toggle" type="button" data-target="playersPanel">
+      <span>Players Online</span>
+      <span class="collapse-icon">+</span>
+    </button>
+
+    <div class="panel-status" id="playersStatus">
+      Select "Online Multiplayer" mode to find players.
+    </div>
+
+    <div class="collapse-content" id="playersPanel">
+      <div id="onlineInfo">Enter your name and click "Find a player" to appear online.</div>
+      <div id="onlinePlayers">No players online</div>
+    </div>
+  </div>
+
+  <div class="online-box collapsible-box">
+    <button class="collapse-toggle" type="button" data-target="matchesPanel">
+      <span>Public Matches</span>
+      <span class="collapse-icon">+</span>
+    </button>
+
+    <div class="panel-status" id="matchesStatus">
+      No public matches
+    </div>
+
+    <div class="collapse-content" id="matchesPanel">
+      <div id="publicMatches">No public matches</div>
+    </div>
+  </div>
+</section>
+
+      <div id="scoreBoard" class="score-board">
+        <div class="score-title">MATCH SCORE</div>
+        <div id="scoreText">0 - 0</div>
+      </div>
+
+      <main class="game-area">
+        <div id="shareContainer" style="display:none; text-align:center; margin-bottom:10px;">
+          <button id="shareMatchBtn" type="button">📤 Share this match</button>
+        </div>
+
+        <div id="board" aria-label="Gomoku game board"></div>
+      </main>
+
+    </div>
+  </div>
+
+  <div id="chatContainer">
+    <div id="chatHeader">
+      💬 Chat <span id="chatBadge">●</span>
+    </div>
+
+    <div id="chatContent">
+      <div id="chatBox">Aucun message...</div>
+
+      <div class="chat-input-row">
+        <input id="chatInput" type="text" placeholder="Message..." />
+        <button id="chatSend" type="button" onclick="sendMessage()">➤</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+  <script src="script.js"></script>
+
+  <script>
+  window.fbAsyncInit = function () {
+    FB.init({
+      appId: "4342290986029133",
+      cookie: true,
+      xfbml: true,
+      version: "v19.0"
+    });
+  };
+
+  (function (d, s, id) {
+    var js, fjs = d.getElementsByTagName(s)[0];
+    if (d.getElementById(id)) return;
+    js = d.createElement(s); js.id = id;
+    js.src = "https://connect.facebook.net/en_US/sdk.js";
+    fjs.parentNode.insertBefore(js, fjs);
+  }(document, 'script', 'facebook-jssdk'));
+</script>
+
+</body>
+</html>
