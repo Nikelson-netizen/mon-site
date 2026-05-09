@@ -1,4 +1,4 @@
-package com.nikelson.gomoku;
+package com.nikelson.gomokuonline;
 
 import com.getcapacitor.BridgeActivity;
 
