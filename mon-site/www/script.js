@@ -38,10 +38,7 @@ if (playerNameInput) {
       }
     }
 
-    if (scoreText) {
-      scoreText.textContent =
-        `${currentBlackName} ${matchScore.black} - ${matchScore.white} ${currentWhiteName}`;
-    }
+    renderMatchScore();
   });
 }
 
@@ -233,15 +230,19 @@ function getPlayerDisplayName(color) {
   return color;
 }
 
+function renderMatchScore() {
+  if (!scoreText) return;
+
+  scoreText.textContent =
+    `${currentBlackName} ${matchScore.black} - ${matchScore.white} ${currentWhiteName}`;
+}
+
 function resetMatchScore() {
   matchScore.black = 0;
   matchScore.white = 0;
   winnerAlreadyCounted = false;
 
-  if (scoreText) {
-    scoreText.textContent =
-      `${currentBlackName} ${matchScore.black} - ${matchScore.white} ${currentWhiteName}`;
-  }
+  renderMatchScore();
 }
 
 function clearWinnerClasses() {
@@ -319,7 +320,9 @@ function showWinner(winnerName) {
 
   highlightWinningLineFromBoard();
 
-  if (!winnerAlreadyCounted) {
+  const isOnlineOrWatching = modeSelect.value === "online" || isWatching;
+
+  if (!winnerAlreadyCounted && !isOnlineOrWatching) {
     if (winnerName === currentBlackName) {
       matchScore.black++;
     }
@@ -327,14 +330,10 @@ function showWinner(winnerName) {
     if (winnerName === currentWhiteName) {
       matchScore.white++;
     }
-
-    winnerAlreadyCounted = true;
   }
 
-  if (scoreText) {
-    scoreText.textContent =
-      `${currentBlackName} ${matchScore.black} - ${matchScore.white} ${currentWhiteName}`;
-  }
+  winnerAlreadyCounted = true;
+  renderMatchScore();
 
   status.textContent =
     `🎉 ${winnerName} wins the game! Score: ${currentBlackName} ${matchScore.black} - ${matchScore.white} ${currentWhiteName}`;
@@ -359,9 +358,9 @@ function showWinner(winnerName) {
     challengeBtn.style.display = "inline-block";
 
     const humanWonVsAI =
-  challengeSessionActive &&
-  modeSelect.value === "ai" &&
-  winnerName === getPlayerDisplayName(HUMAN_PLAYER);
+      challengeSessionActive &&
+      modeSelect.value === "ai" &&
+      winnerName === getPlayerDisplayName(HUMAN_PLAYER);
 
     if (humanWonVsAI) {
       challengeBtn.onclick = () => {
@@ -1193,48 +1192,68 @@ function initSocket() {
   });
 
   socket.on("watchStart", ({
-    matchId,
-    board: matchBoard,
-    blackName,
-    whiteName,
-    currentPlayer: watchedCurrentPlayer,
-    gameOver: watchedGameOver,
-    winnerName
-  }) => {
-    isWatching = true;
-    watchingMatchId = matchId;
-    myColor = null;
+  matchId,
+  board: matchBoard,
+  blackName,
+  whiteName,
+  currentPlayer: watchedCurrentPlayer,
+  gameOver: watchedGameOver,
+  winnerName,
+  matchScore: serverMatchScore
+}) => {
+  isWatching = true;
+  watchingMatchId = matchId;
+  myColor = null;
+  gameOver = !!watchedGameOver;
+  winnerAlreadyCounted = true;
+  lastMoveIndex = null;
+  winningLine = [];
 
-    currentBlackName = blackName || "Black";
-    currentWhiteName = whiteName || "White";
-    currentPlayer = watchedCurrentPlayer;
-    gameOver = !!watchedGameOver;
+  currentBlackName = blackName || "Black";
+  currentWhiteName = whiteName || "White";
+  matchScore = {
+  black: Number(serverMatchScore?.black || 0),
+  white: Number(serverMatchScore?.white || 0)
+};
+  currentPlayer = watchedCurrentPlayer || "black";
 
-    applyBoardFromServer(matchBoard || Array(N).fill(null));
+  if (Array.isArray(matchBoard) && matchBoard.length === N) {
+    applyBoardFromServer(matchBoard);
+  } else {
+    applyBoardFromServer(Array(N).fill(null));
+  }
 
-    document.body.classList.add("watching-mode");
-    board.classList.add("spectator-board");
-    document.body.classList.toggle("white-turn", currentPlayer === "white");
+  renderMatchScore();
 
-    if (gameOver) {
-      lockBoard();
-      if (winnerName) showWinner(winnerName);
-      return;
-    }
+  document.body.classList.add("watching-mode");
+  board.classList.add("spectator-board");
+  document.body.classList.toggle("white-turn", currentPlayer === "white");
 
+  if (leaveMatchButton) {
+    leaveMatchButton.textContent = "Leave Watch";
+  }
+
+  if (gameOver) {
+    lockBoard();
+    if (winnerName) showWinner(winnerName);
+  } else {
     unlockBoard();
     status.textContent = `👀 Watching ${currentBlackName} vs ${currentWhiteName}`;
-  });
+  }
+
+  renderPublicMatches(publicMatches);
+});
 
   socket.on("gameStart", ({
-    color,
-    opponentName,
-    blackName,
-    whiteName,
-    board: matchBoard,
-    currentPlayer: serverCurrentPlayer,
-    winnerName
-  }) => {
+  color,
+  opponentName,
+  blackName,
+  whiteName,
+  board: matchBoard,
+  currentPlayer: serverCurrentPlayer,
+  winnerName,
+  matchScore: serverMatchScore
+}) => {
     document.body.classList.remove("watching-mode");
     board.classList.remove("spectator-board");
     isWatching = false;
@@ -1245,9 +1264,16 @@ function initSocket() {
     pendingInviteTargetName = "";
 
     myColor = color;
-    resetMatchScore();
+    matchScore = {
+  black: Number(serverMatchScore?.black || 0),
+  white: Number(serverMatchScore?.white || 0)
+};
+    winnerAlreadyCounted = false;
+
     currentBlackName = blackName || (color === "black" ? myPlayerName : opponentName || "Black");
     currentWhiteName = whiteName || (color === "white" ? myPlayerName : opponentName || "White");
+
+    renderMatchScore();
 
     currentPlayer = serverCurrentPlayer || "black";
     gameOver = false;
@@ -1322,16 +1348,22 @@ function initSocket() {
   });
 
   socket.on("matchState", ({
-    matchId,
-    board: serverBoard,
-    blackName,
-    whiteName,
-    currentPlayer: serverCurrentPlayer,
-    gameOver: serverGameOver,
-    winnerName
-  }) => {
+  matchId,
+  board: serverBoard,
+  blackName,
+  whiteName,
+  currentPlayer: serverCurrentPlayer,
+  gameOver: serverGameOver,
+  winnerName,
+  matchScore: serverMatchScore
+}) => {
     currentBlackName = blackName || "Black";
     currentWhiteName = whiteName || "White";
+    matchScore = {
+  black: Number(serverMatchScore?.black || 0),
+  white: Number(serverMatchScore?.white || 0)
+};
+    renderMatchScore();
     currentPlayer = serverCurrentPlayer || "black";
     gameOver = !!serverGameOver;
 
@@ -1357,20 +1389,30 @@ function initSocket() {
     updateTurnStatus();
   });
 
-  socket.on("gameWon", ({ winnerName }) => {
-    gameOver = true;
-    lockBoard();
-    showWinner(winnerName);
-  });
+  socket.on("gameWon", ({ winnerName, blackName, whiteName, matchScore: serverMatchScore }) => {
+  currentBlackName = blackName || currentBlackName;
+  currentWhiteName = whiteName || currentWhiteName;
+  matchScore = {
+  black: Number(serverMatchScore?.black || 0),
+  white: Number(serverMatchScore?.white || 0)
+};
+  winnerAlreadyCounted = true;
+
+  gameOver = true;
+  lockBoard();
+  renderMatchScore();
+  showWinner(winnerName);
+});
 
   socket.on("onlineGameReset", ({
-    board: serverBoard,
-    currentPlayer: serverCurrentPlayer,
-    blackName,
-    whiteName,
-    gameOver: serverGameOver,
-    winnerName
-  }) => {
+  board: serverBoard,
+  currentPlayer: serverCurrentPlayer,
+  blackName,
+  whiteName,
+  gameOver: serverGameOver,
+  winnerName,
+  matchScore: serverMatchScore
+}) => {
     unlockBoard();
 
     resetButton.textContent = "Restart";
@@ -1378,6 +1420,12 @@ function initSocket() {
 
     currentBlackName = blackName || currentBlackName;
     currentWhiteName = whiteName || currentWhiteName;
+    matchScore = {
+  black: Number(serverMatchScore?.black || 0),
+  white: Number(serverMatchScore?.white || 0)
+};
+    winnerAlreadyCounted = false;
+    renderMatchScore();
 
     applyBoardFromServer(serverBoard || Array(N).fill(null));
 
@@ -1407,19 +1455,22 @@ function initSocket() {
   });
 
   socket.on("watchEnded", () => {
-    isWatching = false;
-    watchingMatchId = null;
-    document.body.classList.remove("watching-mode");
-    board.classList.remove("spectator-board");
-    unlockBoard();
+  isWatching = false;
+  watchingMatchId = null;
 
-    if (leaveMatchButton) leaveMatchButton.textContent = "End Match";
+  document.body.classList.remove("watching-mode");
+  board.classList.remove("spectator-board");
+  unlockBoard();
 
-    resetMatchScore();
-    resetGame();
-  });
+  if (leaveMatchButton) {
+    leaveMatchButton.textContent = "End Match";
+  }
 
-  socket.on("matchEnded", ({ message }) => {
+  renderPublicMatches(publicMatches);
+  updateTurnStatus();
+});
+
+  socket.on("matchEnded", ({ message, blackName, whiteName, matchScore: serverMatchScore }) => {
     document.body.classList.remove("watching-mode");
     board.classList.remove("spectator-board");
     isWatching = false;
@@ -1434,9 +1485,11 @@ function initSocket() {
     myColor = null;
     gameOver = true;
     currentPlayer = "black";
-    currentBlackName = "Black";
-    currentWhiteName = "White";
-    resetMatchScore();
+    currentBlackName = blackName || "Black";
+    currentWhiteName = whiteName || "White";
+    matchScore = serverMatchScore || { black: 0, white: 0 };
+    winnerAlreadyCounted = false;
+    renderMatchScore();
 
     grid.fill(null);
     lastMoveIndex = null;
@@ -1474,7 +1527,9 @@ function resetGame() {
   watchingMatchId = null;
   resetButton.style.display = "inline-block";
 
+  if (modeSelect.value !== "online") {
   refreshPlayerNames();
+}
 
   if (modeSelect.value !== "online") {
   if (onlineInfo) {
@@ -1506,10 +1561,7 @@ function resetGame() {
     shareContainer.style.display = "none";
   }
 
-  if (scoreText) {
-    scoreText.textContent =
-      `${currentBlackName} ${matchScore.black} - ${matchScore.white} ${currentWhiteName}`;
-  }
+  renderMatchScore();
 
   if (modeSelect.value === "online") {
     if (socket && myColor) {
@@ -1558,13 +1610,17 @@ if (leaveMatchButton) {
 
     if (isWatching) {
       socket.emit("leaveWatch");
+
+      isWatching = false;
+      watchingMatchId = null;
+
       document.body.classList.remove("watching-mode");
       board.classList.remove("spectator-board");
       unlockBoard();
+
       leaveMatchButton.textContent = "End Match";
-      isWatching = false;
-      watchingMatchId = null;
-      resetGame();
+      renderPublicMatches(publicMatches);
+      updateTurnStatus();
       return;
     }
 
@@ -1803,47 +1859,50 @@ if (fbLoginBtn) {
 }
 
 let deferredPrompt = null;
+
 const installBtn = document.getElementById("installBtn");
 
 if (installBtn) {
   installBtn.style.display = "none";
 }
 
-// Capture install event
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   deferredPrompt = e;
-
   console.log("Install prompt ready");
 
   if (installBtn) {
-    installBtn.style.display = "inline-flex";
-  }
-});
-
-// Click install
-installBtn?.addEventListener("click", async () => {
-  if (!deferredPrompt) {
-    console.log("No install prompt available yet");
-    return;
-  }
-
-  try {
-    await deferredPrompt.prompt();
-    const choice = await deferredPrompt.userChoice;
-
-    console.log("User choice:", choice.outcome);
-  } catch (error) {
-    console.error("Install failed:", error);
-  }
-
-  deferredPrompt = null;
   installBtn.style.display = "none";
+}
 });
 
-// After install
+if (installBtn) {
+  installBtn.addEventListener("click", async () => {
+    if (!deferredPrompt) {
+      console.log("No install prompt available yet");
+      return;
+    }
+
+    try {
+      await deferredPrompt.prompt();
+      const choiceResult = await deferredPrompt.userChoice;
+
+      if (choiceResult.outcome === "accepted") {
+        console.log("PWA install accepted");
+      } else {
+        console.log("PWA install dismissed");
+      }
+    } catch (error) {
+      console.error("PWA install failed:", error);
+    }
+
+    deferredPrompt = null;
+    installBtn.style.display = "none";
+  });
+}
+
 window.addEventListener("appinstalled", () => {
-  console.log("PWA installed");
+  console.log("PWA was installed");
   deferredPrompt = null;
 
   if (installBtn) {
@@ -1851,13 +1910,13 @@ window.addEventListener("appinstalled", () => {
   }
 });
 
-// Service worker
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("/service-worker.js")
-      .then((reg) => console.log("SW registered", reg))
-      .catch((err) => console.error("SW failed", err));
+  window.addEventListener("load", async () => {
+    try {
+      const registration = await navigator.serviceWorker.register("/service-worker.js");
+      console.log("Service worker registered", registration);
+    } catch (error) {
+      console.error("Service worker registration failed:", error);
+    }
   });
 }
-

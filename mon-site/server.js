@@ -72,10 +72,9 @@ const pendingInvites = new Map();
    CHALLENGE LEADERBOARD BY LEVEL
 ========================= */
 
-const VALID_LEVELS = ["1", "2", "3", "4", "5"];
+const VALID_LEVELS = ["2", "3", "4", "5"];
 
 const challengeLeaderboards = {
-  "1": [],
   "2": [],
   "3": [],
   "4": [],
@@ -89,47 +88,43 @@ function normalizePlayerName(name) {
     .slice(0, MAX_NAME_LENGTH);
 }
 
+function normalizePlayerId(playerId) {
+  return String(playerId || "").trim().slice(0, 80);
+}
+
 function normalizeLevel(level) {
   const clean = String(level || "").trim();
   return VALID_LEVELS.includes(clean) ? clean : "2";
 }
 
 function getLevelBoard(level) {
-  const cleanLevel = normalizeLevel(level);
-  return challengeLeaderboards[cleanLevel];
+  return challengeLeaderboards[normalizeLevel(level)];
 }
 
 function sortLevelBoard(level) {
-  getLevelBoard(level).sort((a, b) => b.points - a.points);
+  getLevelBoard(level).sort((a, b) => (b.points || 0) - (a.points || 0));
 }
 
-function sortAllChallengeBoards() {
-  VALID_LEVELS.forEach(sortLevelBoard);
+function findChallengePlayer(level, playerId) {
+  const cleanId = normalizePlayerId(playerId);
+  if (!cleanId) return null;
+
+  return getLevelBoard(level).find((p) => p.playerId === cleanId) || null;
 }
 
-function findChallengePlayer(level, name) {
-  const board = getLevelBoard(level);
-  const cleanName = normalizePlayerName(name);
-  if (!cleanName) return null;
-
-  return (
-    board.find(
-      (player) => player.name.toLowerCase() === cleanName.toLowerCase()
-    ) || null
-  );
-}
-
-function upsertChallengePlayer(level, name, updates = {}) {
+function upsertChallengePlayer(level, playerId, name, updates = {}) {
   const cleanLevel = normalizeLevel(level);
+  const cleanId = normalizePlayerId(playerId);
   const cleanName = normalizePlayerName(name);
-  if (!cleanName) return null;
+
+  if (!cleanId || !cleanName || cleanName === "Player") return null;
 
   const board = getLevelBoard(cleanLevel);
-
-  let player = findChallengePlayer(cleanLevel, cleanName);
+  let player = findChallengePlayer(cleanLevel, cleanId);
 
   if (!player) {
     player = {
+      playerId: cleanId,
       name: cleanName,
       points: 0,
       online: false,
@@ -137,6 +132,8 @@ function upsertChallengePlayer(level, name, updates = {}) {
     };
     board.push(player);
   }
+
+  player.name = cleanName;
 
   if (typeof updates.points === "number" && Number.isFinite(updates.points)) {
     player.points = Math.max(0, Math.floor(updates.points));
@@ -152,8 +149,8 @@ function upsertChallengePlayer(level, name, updates = {}) {
   return player;
 }
 
-function setChallengePlayerOffline(level, name) {
-  const player = findChallengePlayer(level, name);
+function setChallengePlayerOffline(level, playerId) {
+  const player = findChallengePlayer(level, playerId);
   if (!player) return;
 
   player.online = false;
@@ -166,8 +163,9 @@ function getChallengeLeaderboardView(level) {
 
   return getLevelBoard(cleanLevel).map((player, index) => ({
     rank: index + 1,
+    playerId: player.playerId,
     name: player.name,
-    points: player.points,
+    points: player.points || 0,
     online: !!player.online,
     level: cleanLevel
   }));
@@ -321,17 +319,18 @@ function buildSafeMatchesForSocket(socketId) {
       m.blackId === socketId || m.whiteId === socketId;
 
     return {
-      id: m.id,
-      blackId: m.blackId,
-      whiteId: m.whiteId,
-      blackName: m.blackName,
-      whiteName: m.whiteName,
-      currentPlayer: m.currentPlayer,
-      gameOver: m.gameOver,
-      winnerName: m.winnerName,
-      spectatorCount: getSpectatorCount(m),
-      canWatch: !isPlayerInThisMatch,
-    };
+  id: m.id,
+  blackId: m.blackId,
+  whiteId: m.whiteId,
+  blackName: m.blackName,
+  whiteName: m.whiteName,
+  currentPlayer: m.currentPlayer,
+  gameOver: m.gameOver,
+  winnerName: m.winnerName,
+  spectatorCount: getSpectatorCount(m),
+  matchScore: m.matchScore || { black: 0, white: 0 },
+  canWatch: !isPlayerInThisMatch,
+};
   });
 }
 
@@ -383,6 +382,7 @@ function emitMatchState(match) {
     gameOver: match.gameOver,
     winnerName: match.winnerName,
     spectatorCount: getSpectatorCount(match),
+    matchScore: match.matchScore || { black: 0, white: 0 },
   });
 
   broadcastMatches();
@@ -472,19 +472,21 @@ function cleanupDisconnectedPlayer(socketId) {
       if (other) {
         other.status = "available";
         io.to(otherId).emit("matchEnded", {
-          message: "Opponent disconnected. Match ended.",
-          winnerName: match.winnerName,
-          blackName: match.blackName,
-          whiteName: match.whiteName,
-        });
+  message: "Opponent disconnected. Match ended.",
+  winnerName: match.winnerName,
+  blackName: match.blackName,
+  whiteName: match.whiteName,
+  matchScore: match.matchScore || { black: 0, white: 0 },
+});
       }
 
       io.to(match.id).emit("matchEnded", {
-        message: "A player disconnected. Match ended.",
-        winnerName: match.winnerName,
-        blackName: match.blackName,
-        whiteName: match.whiteName,
-      });
+  message: "A player disconnected. Match ended.",
+  winnerName: match.winnerName,
+  blackName: match.blackName,
+  whiteName: match.whiteName,
+  matchScore: match.matchScore || { black: 0, white: 0 },
+});
 
       leaveMatchRoom(match.blackId, match.id);
       leaveMatchRoom(match.whiteId, match.id);
@@ -545,10 +547,18 @@ app.get("/api/challenge/leaderboards", (req, res) => {
 });
 
 app.post("/api/challenge/leaderboard/upsert", (req, res) => {
-  const { name, points, online, level } = req.body || {};
+  const { playerId, name, points, online, level } = req.body || {};
 
+  const cleanId = normalizePlayerId(playerId);
   const cleanName = normalizePlayerName(name);
   const cleanLevel = normalizeLevel(level);
+
+  if (!cleanId) {
+    return res.status(400).json({
+      success: false,
+      message: "Valid playerId is required."
+    });
+  }
 
   if (!cleanName || cleanName === "Player") {
     return res.status(400).json({
@@ -557,7 +567,7 @@ app.post("/api/challenge/leaderboard/upsert", (req, res) => {
     });
   }
 
-  const updatedPlayer = upsertChallengePlayer(cleanLevel, cleanName, {
+  const updatedPlayer = upsertChallengePlayer(cleanLevel, cleanId, cleanName, {
     points: typeof points === "number" ? points : undefined,
     online: typeof online === "boolean" ? online : undefined
   });
@@ -571,7 +581,6 @@ app.post("/api/challenge/leaderboard/upsert", (req, res) => {
     leaderboard: getChallengeLeaderboardView(cleanLevel)
   });
 });
-
 /* =========================
    SOCKET.IO
 ========================= */
@@ -594,56 +603,57 @@ io.on("connection", (socket) => {
 
   /* ===== CHALLENGE SOCKET EVENTS ===== */
 
-  socket.on("registerChallengePlayer", ({ name, level }) => {
-    if (!canPerformAction(socket, "registerChallengePlayer", 600)) {
-      return;
-    }
+  socket.challengePlayerId = null;
+socket.challengePlayerName = null;
+socket.challengeLevel = null;
 
-    const cleanName = normalizePlayerName(name);
-    const cleanLevel = normalizeLevel(level);
+socket.on("registerChallengePlayer", ({ playerId, name, level }) => {
+  if (!canPerformAction(socket, "registerChallengePlayer", 600)) return;
 
-    if (!cleanName || cleanName === "Player") return;
+  const cleanId = normalizePlayerId(playerId);
+  const cleanName = normalizePlayerName(name);
+  const cleanLevel = normalizeLevel(level);
 
-    if (
-      socket.challengePlayerName &&
-      socket.challengeLevel &&
-      (
-        socket.challengePlayerName.toLowerCase() !== cleanName.toLowerCase() ||
-        socket.challengeLevel !== cleanLevel
-      )
-    ) {
-      setChallengePlayerOffline(socket.challengeLevel, socket.challengePlayerName);
-      broadcastChallengeLeaderboard(socket.challengeLevel);
-    }
+  if (!cleanId || !cleanName || cleanName === "Player") return;
 
-    socket.challengePlayerName = cleanName;
-    socket.challengeLevel = cleanLevel;
+  if (
+    socket.challengePlayerId &&
+    socket.challengeLevel &&
+    (socket.challengePlayerId !== cleanId || socket.challengeLevel !== cleanLevel)
+  ) {
+    setChallengePlayerOffline(socket.challengeLevel, socket.challengePlayerId);
+    broadcastChallengeLeaderboard(socket.challengeLevel);
+  }
 
-    upsertChallengePlayer(cleanLevel, cleanName, { online: true });
-    broadcastChallengeLeaderboard(cleanLevel);
+  socket.challengePlayerId = cleanId;
+  socket.challengePlayerName = cleanName;
+  socket.challengeLevel = cleanLevel;
+
+  upsertChallengePlayer(cleanLevel, cleanId, cleanName, { online: true });
+  broadcastChallengeLeaderboard(cleanLevel);
+});
+
+socket.on("updateChallengePoints", ({ playerId, name, points, level }) => {
+  if (!canPerformAction(socket, "updateChallengePoints", 300)) return;
+
+  const cleanId = normalizePlayerId(playerId);
+  const cleanName = normalizePlayerName(name);
+  const cleanLevel = normalizeLevel(level);
+
+  if (!cleanId || !cleanName || cleanName === "Player") return;
+  if (typeof points !== "number" || !Number.isFinite(points)) return;
+
+  socket.challengePlayerId = cleanId;
+  socket.challengePlayerName = cleanName;
+  socket.challengeLevel = cleanLevel;
+
+  upsertChallengePlayer(cleanLevel, cleanId, cleanName, {
+    points: Math.floor(points),
+    online: true
   });
 
-  socket.on("updateChallengePoints", ({ name, points, level }) => {
-    if (!canPerformAction(socket, "updateChallengePoints", 300)) {
-      return;
-    }
-
-    const cleanName = normalizePlayerName(name);
-    const cleanLevel = normalizeLevel(level);
-
-    if (!cleanName || cleanName === "Player") return;
-    if (typeof points !== "number" || !Number.isFinite(points)) return;
-
-    socket.challengePlayerName = cleanName;
-    socket.challengeLevel = cleanLevel;
-
-    upsertChallengePlayer(cleanLevel, cleanName, {
-      points: Math.floor(points),
-      online: true
-    });
-
-    broadcastChallengeLeaderboard(cleanLevel);
-  });
+  broadcastChallengeLeaderboard(cleanLevel);
+});
 
   /* ===== CHAT ===== */
 
@@ -785,18 +795,22 @@ io.on("connection", (socket) => {
     logStats();
 
     const match = {
-      id: `${fromId}-${socket.id}-${Date.now()}`,
-      blackId: fromId,
-      whiteId: socket.id,
-      blackName: other.name,
-      whiteName: me.name,
-      board: Array(BOARD_CELLS).fill(null),
-      currentPlayer: "black",
-      nextStarterId: socket.id,
-      gameOver: false,
-      winnerName: null,
-      spectators: new Set(),
-    };
+  id: `${fromId}-${socket.id}-${Date.now()}`,
+  blackId: fromId,
+  whiteId: socket.id,
+  blackName: other.name,
+  whiteName: me.name,
+  board: Array(BOARD_CELLS).fill(null),
+  currentPlayer: "black",
+  nextStarterId: socket.id,
+  gameOver: false,
+  winnerName: null,
+  spectators: new Set(),
+  matchScore: {
+    black: 0,
+    white: 0,
+  },
+};
 
     publicMatches.push(match);
     pendingInvites.delete(socket.id);
@@ -807,30 +821,32 @@ io.on("connection", (socket) => {
     setSocketMatchId(match.whiteId, match.id);
 
     io.to(fromId).emit("gameStart", {
-      matchId: match.id,
-      color: "black",
-      opponentName: me.name,
-      blackName: match.blackName,
-      whiteName: match.whiteName,
-      currentPlayer: match.currentPlayer,
-      board: match.board,
-      gameOver: match.gameOver,
-      winnerName: match.winnerName,
-      spectatorCount: getSpectatorCount(match),
-    });
+  matchId: match.id,
+  color: "black",
+  opponentName: me.name,
+  blackName: match.blackName,
+  whiteName: match.whiteName,
+  currentPlayer: match.currentPlayer,
+  board: match.board,
+  gameOver: match.gameOver,
+  winnerName: match.winnerName,
+  spectatorCount: getSpectatorCount(match),
+  matchScore: match.matchScore,
+});
 
     socket.emit("gameStart", {
-      matchId: match.id,
-      color: "white",
-      opponentName: other.name,
-      blackName: match.blackName,
-      whiteName: match.whiteName,
-      currentPlayer: match.currentPlayer,
-      board: match.board,
-      gameOver: match.gameOver,
-      winnerName: match.winnerName,
-      spectatorCount: getSpectatorCount(match),
-    });
+  matchId: match.id,
+  color: "white",
+  opponentName: other.name,
+  blackName: match.blackName,
+  whiteName: match.whiteName,
+  currentPlayer: match.currentPlayer,
+  board: match.board,
+  gameOver: match.gameOver,
+  winnerName: match.winnerName,
+  spectatorCount: getSpectatorCount(match),
+  matchScore: match.matchScore,
+});
 
     emitMatchState(match);
     broadcastPlayers();
@@ -879,8 +895,8 @@ io.on("connection", (socket) => {
 
     removeSpectatorFromAllMatches(socket.id);
 
-    socket.join(matchId);
-    socket.matchId = matchId;
+    joinMatchRoom(socket.id, match.id);
+    setSocketMatchId(socket.id, match.id);
 
     if (!match.spectators) {
       match.spectators = new Set();
@@ -889,15 +905,16 @@ io.on("connection", (socket) => {
     match.spectators.add(socket.id);
 
     socket.emit("watchStart", {
-      matchId: match.id,
-      board: match.board,
-      blackName: match.blackName,
-      whiteName: match.whiteName,
-      currentPlayer: match.currentPlayer,
-      gameOver: match.gameOver,
-      winnerName: match.winnerName,
-      spectatorCount: getSpectatorCount(match),
-    });
+  matchId: match.id,
+  board: match.board,
+  blackName: match.blackName,
+  whiteName: match.whiteName,
+  currentPlayer: match.currentPlayer,
+  gameOver: match.gameOver,
+  winnerName: match.winnerName,
+  spectatorCount: getSpectatorCount(match),
+  matchScore: match.matchScore || { black: 0, white: 0 },
+});
 
     emitMatchState(match);
   });
@@ -959,21 +976,34 @@ io.on("connection", (socket) => {
     io.to(match.id).emit("movePlayed", { index, player });
 
     if (isWinningMove(match.board, index, player)) {
-      match.gameOver = true;
-      match.winnerName = player === "black" ? match.blackName : match.whiteName;
+  match.gameOver = true;
+  match.winnerName = player === "black" ? match.blackName : match.whiteName;
 
-      stats.totalGamesFinished++;
-      console.log("🏁 Match finished");
-      logStats();
+  if (!match.matchScore) {
+    match.matchScore = { black: 0, white: 0 };
+  }
 
-      io.to(match.id).emit("gameWon", {
-        winnerColor: player,
-        winnerName: match.winnerName,
-      });
+  if (player === "black") {
+    match.matchScore.black += 1;
+  } else {
+    match.matchScore.white += 1;
+  }
 
-      emitMatchState(match);
-      return;
-    }
+  stats.totalGamesFinished++;
+  console.log("🏁 Match finished");
+  logStats();
+
+  io.to(match.id).emit("gameWon", {
+    winnerColor: player,
+    winnerName: match.winnerName,
+    blackName: match.blackName,
+    whiteName: match.whiteName,
+    matchScore: match.matchScore,
+  });
+
+  emitMatchState(match);
+  return;
+}
 
     match.currentPlayer = player === "black" ? "white" : "black";
     emitMatchState(match);
@@ -1009,14 +1039,15 @@ io.on("connection", (socket) => {
     }
 
     io.to(match.id).emit("onlineGameReset", {
-      board: match.board,
-      currentPlayer: match.currentPlayer,
-      blackName: match.blackName,
-      whiteName: match.whiteName,
-      gameOver: match.gameOver,
-      winnerName: match.winnerName,
-      spectatorCount: getSpectatorCount(match),
-    });
+  board: match.board,
+  currentPlayer: match.currentPlayer,
+  blackName: match.blackName,
+  whiteName: match.whiteName,
+  gameOver: match.gameOver,
+  winnerName: match.winnerName,
+  spectatorCount: getSpectatorCount(match),
+  matchScore: match.matchScore || { black: 0, white: 0 },
+});
 
     emitMatchState(match);
   });
@@ -1043,11 +1074,12 @@ io.on("connection", (socket) => {
     if (white) white.status = "available";
 
     io.to(match.id).emit("matchEnded", {
-      message: "Match ended.",
-      winnerName: match.winnerName,
-      blackName: match.blackName,
-      whiteName: match.whiteName,
-    });
+  message: "Match ended.",
+  winnerName: match.winnerName,
+  blackName: match.blackName,
+  whiteName: match.whiteName,
+  matchScore: match.matchScore || { black: 0, white: 0 },
+});
 
     leaveMatchRoom(match.blackId, match.id);
     leaveMatchRoom(match.whiteId, match.id);
@@ -1073,7 +1105,7 @@ io.on("connection", (socket) => {
     console.log("🔴 User disconnected:", socket.id);
 
     if (socket.challengePlayerName && socket.challengeLevel) {
-      setChallengePlayerOffline(socket.challengeLevel, socket.challengePlayerName);
+      setChallengePlayerOffline(socket.challengeLevel, socket.challengePlayerId);
       broadcastChallengeLeaderboard(socket.challengeLevel);
     }
 

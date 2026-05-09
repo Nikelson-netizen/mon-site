@@ -34,12 +34,28 @@ const isChallengePage = !!document.querySelector(".challenge-page");
 // ✅ Level 1 supprimé
 const VALID_LEVELS = ["2", "3", "4", "5"];
 
+function getChallengePlayerId() {
+  let id = localStorage.getItem("challengePlayerId");
+
+  if (!id) {
+    id =
+      "challenge_" +
+      Date.now() +
+      "_" +
+      Math.random().toString(36).slice(2, 10);
+
+    localStorage.setItem("challengePlayerId", id);
+  }
+
+  return id;
+}
+
 function getChallengeSocket() {
   return typeof socket !== "undefined" ? socket : null;
 }
 
 const defaultChallengeData = {
-  browserPlayerId: "local-browser-player",
+  browserPlayerId: getChallengePlayerId(),
   playerName: localStorage.getItem("challengePlayerName") || localStorage.getItem("playerName") || "Player",
   online: false,
 
@@ -376,18 +392,7 @@ function updateLocalLeaderboardName(oldName, newName) {
       });
     }
 
-    // dédoublonnage
-    const seen = new Map();
-    updated.forEach((player) => {
-      if (!player || !player.name) return;
-      const key = player.name.trim().toLowerCase();
-      const prev = seen.get(key);
-      if (!prev || (player.points || 0) >= (prev.points || 0)) {
-        seen.set(key, player);
-      }
-    });
-
-    challengeData.leaderboards[level] = Array.from(seen.values());
+  challengeData.leaderboards[level] = updated;
   });
 }
 
@@ -558,12 +563,13 @@ async function fetchChallengeLeaderboardFromServer(level = getSelectedLeaderboar
 
     if (!data.success || !Array.isArray(data.leaderboard)) return;
 
-    challengeData.leaderboards[cleanLevel] = data.leaderboard.map((player) => ({
-      name: player.name,
-      points: player.points,
-      online: !!player.online,
-      level: cleanLevel
-    }));
+  challengeData.leaderboards[cleanLevel] = data.leaderboard.map((player) => ({
+  playerId: player.playerId,
+  name: player.name,
+  points: player.points,
+  online: !!player.online,
+  level: cleanLevel
+}));
 
     saveChallengeData();
     renderLeaderboard();
@@ -581,13 +587,14 @@ async function fetchAllLeaderboardsFromServer() {
 
     VALID_LEVELS.forEach((level) => {
       challengeData.leaderboards[level] = Array.isArray(data.leaderboards[level])
-        ? data.leaderboards[level].map((player) => ({
-            name: player.name,
-            points: player.points,
-            online: !!player.online,
-            level
-          }))
-        : [];
+  ? data.leaderboards[level].map((player) => ({
+      playerId: player.playerId,
+      name: player.name,
+      points: player.points,
+      online: !!player.online,
+      level
+    }))
+  : [];
     });
 
     saveChallengeData();
@@ -617,11 +624,12 @@ async function syncCurrentPlayerToServer() {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        name: playerName,
-        points: stats.points || 0,
-        online: true,
-        level
-      })
+  playerId: getChallengePlayerId(),
+  name: playerName,
+  points: stats.points || 0,
+  online: true,
+  level
+})
     });
 
     await fetchChallengeLeaderboardFromServer(level);
@@ -642,10 +650,11 @@ function syncPointsToServer(level = getCurrentChallengeLevel()) {
     challengeData.playerName !== "Player"
   ) {
     challengeSocket.emit("updateChallengePoints", {
-      name: challengeData.playerName,
-      points: stats.points || 0,
-      level: cleanLevel
-    });
+  playerId: getChallengePlayerId(),
+  name: challengeData.playerName,
+  points: stats.points || 0,
+  level: cleanLevel
+});
   }
 }
 
@@ -802,9 +811,10 @@ function startChallenge() {
   const challengeSocket = getChallengeSocket();
   if (challengeSocket) {
     challengeSocket.emit("registerChallengePlayer", {
-      name: typedName,
-      level: getCurrentChallengeLevel()
-    });
+  playerId: getChallengePlayerId(),
+  name: typedName,
+  level: getCurrentChallengeLevel()
+});
   }
 
   if (typeof resetGame === "function") {
@@ -897,9 +907,10 @@ function bindChallengePageControls() {
     const challengeSocket = getChallengeSocket();
     if (challengeSocket && name && name !== "Player") {
       challengeSocket.emit("registerChallengePlayer", {
-        name,
-        level: getCurrentChallengeLevel()
-      });
+  playerId: getChallengePlayerId(),
+  name: typedName,
+  level: getCurrentChallengeLevel()
+});
     }
   }
 
@@ -959,9 +970,10 @@ function bindChallengePageControls() {
 
       if (challengeSocket && name && name !== "Player") {
         challengeSocket.emit("registerChallengePlayer", {
-          name,
-          level: cleanLevel
-        });
+  playerId: getChallengePlayerId(),
+  name: typedName,
+  level: getCurrentChallengeLevel()
+});
       }
     });
   }
@@ -1031,7 +1043,7 @@ if (resetChallengeDataBtn) {
       return;
     }
 
-    const ok = confirm(`Reset stats for ${currentName} in Level ${currentLevel}?`);
+    const ok = confirm`(Reset stats for ${currentName} in Level ${currentLevel}?)`;
     if (!ok) return;
 
     challengeData.levelStats[currentLevel] = {
@@ -1057,11 +1069,12 @@ if (resetChallengeDataBtn) {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          name: currentName,
-          points: 0,
-          online: true,
-          level: currentLevel
-        })
+  playerId: getChallengePlayerId(),
+  name: currentName,
+  points: 0,
+  online: true,
+  level: currentLevel
+})
       });
 
       await fetchChallengeLeaderboardFromServer(currentLevel);
@@ -1125,11 +1138,11 @@ async function generateChallengeImage() {
   canvas.height = 1080;
 
   ctx.fillStyle = "#f7efd8";
-ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   ctx.textAlign = "center";
 
-  ctx.fillStyl = "#edf0e3ef";
+  ctx.fillStyle = "#edf0e3";
   ctx.font = "bold 62px Arial";
   ctx.fillText("GOMOKU", 540, 120);
 
@@ -1177,29 +1190,32 @@ ctx.fillRect(0, 0, canvas.width, canvas.height);
   const logo = new Image();
   logo.src = "logo.png";
 
-  await new Promise((resolve, reject) => {
+  await new Promise((resolve) => {
     logo.onload = resolve;
-    logo.onerror = reject;
+    logo.onerror = resolve;
   });
 
   const logoSize = 220;
-  ctx.drawImage(
-    logo,
-    canvas.width / 2 - logoSize / 2,
-    650,
-    logoSize,
-    logoSize
-  );
+
+  if (logo.complete && logo.naturalWidth > 0) {
+    ctx.drawImage(
+      logo,
+      canvas.width / 2 - logoSize / 2,
+      650,
+      logoSize,
+      logoSize
+    );
+  }
 
   ctx.textAlign = "center";
 
-ctx.fillStyle = "#111";
-ctx.font = "bold 28px Arial";
-ctx.fillText(`Join the Level ${selectedLevel} challenge 🔥`, 540, 910);
+  ctx.fillStyle = "#111";
+  ctx.font = "bold 28px Arial";
+  ctx.fillText(`Join the Level ${selectedLevel} challenge 🔥`, 540, 910);
 
-ctx.fillStyle = "#2563eb";
-ctx.font = "bold 26px Arial";
-ctx.fillText("gomoku-morpion-5-online.onrender.com", 540, 960);
+  ctx.fillStyle = "#2563eb";
+  ctx.font = "bold 26px Arial";
+  ctx.fillText("gomoku-morpion-5-online.onrender.com", 540, 960);
 
   return new Promise((resolve) => {
     canvas.toBlob(resolve, "image/png");
@@ -1283,4 +1299,4 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderProfile();
   renderLeaderboard();
   renderHistory();
-});
+})
