@@ -21,7 +21,7 @@ app.use((req, res, next) => {
 
 const fs = require("fs");
 
-const possibleWwwPath = path.join(__dirname, "www");
+const possibleWwwPath = path.join(__dirname, "WWW");
 
 const PUBLIC_PATH = fs.existsSync(possibleWwwPath)
   ? possibleWwwPath
@@ -33,6 +33,8 @@ console.log("www exists:", fs.existsSync(PUBLIC_PATH));
 console.log("index exists:", fs.existsSync(path.join(PUBLIC_PATH, "index.html")));
 console.log("script exists:", fs.existsSync(path.join(PUBLIC_PATH, "script.js")));
 console.log("worker exists:", fs.existsSync(path.join(PUBLIC_PATH, "aiWorker.js")));
+console.log("icon-192 exists:", fs.existsSync(path.join(PUBLIC_PATH, "icons", "icon-192.png")));
+console.log("click.mp3 exists:", fs.existsSync(path.join(PUBLIC_PATH, "sounds", "click.mp3")));
 
 app.use(express.static(PUBLIC_PATH));
 

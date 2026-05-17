@@ -1728,10 +1728,10 @@ const shareSiteBtn = document.getElementById("shareSiteBtn");
 if (shareSiteBtn) {
   shareSiteBtn.addEventListener("click", async () => {
     const shareData = {
-      title: "Can you beat me? 🔥 Gomoku Online",
-      text: "I challenge you. Come play Gomoku and beat me 😏",
-      url: "https://gomoku-morpion-5-online.onrender.com/"
-    };
+  title: "Can you beat me? 🔥 Gomoku Online",
+  text: "Play Gomoku online with real players 🔥 Train your brain and strategy 🧠",
+  url: "https://gomoku-morpion-5-online.onrender.com/"
+};
 
     try {
       if (navigator.share) {
@@ -1920,3 +1920,59 @@ if ("serviceWorker" in navigator) {
     }
   });
 }
+
+function forceHomeToolsDisplay() {
+  const modeSelect = document.getElementById("mode");
+  if (!modeSelect) return;
+
+  const mode = modeSelect.value;
+
+  const aiTools = document.querySelectorAll(".ai-tool");
+  const onlineTools = document.querySelectorAll(".online-tool");
+  const pvpTools = document.querySelectorAll(".pvp-tool");
+
+  aiTools.forEach(el => el.style.display = "none");
+  onlineTools.forEach(el => el.style.display = "none");
+  pvpTools.forEach(el => el.style.display = "none");
+
+  if (mode === "ai") {
+    aiTools.forEach(el => el.style.display = "");
+    pvpTools.forEach(el => el.style.display = "");
+  }
+
+  if (mode === "online") {
+    onlineTools.forEach(el => el.style.display = "");
+  }
+
+  if (mode === "pvp") {
+    pvpTools.forEach(el => el.style.display = "");
+  }
+
+  const inviteBox = document.getElementById("inviteBox");
+
+  if (inviteBox && mode !== "online") {
+    inviteBox.style.display = "none";
+  }
+
+  const chat = document.getElementById("chatContainer");
+
+  if (chat) {
+    chat.style.display = mode === "online" ? "block" : "none";
+  }
+
+  const onlinePanel = document.querySelector(".online-panel");
+
+  if (onlinePanel) {
+    onlinePanel.style.display = mode === "online" ? "" : "none";
+  }
+}
+
+window.addEventListener("load", () => {
+  const modeSelect = document.getElementById("mode");
+
+  forceHomeToolsDisplay();
+
+  if (modeSelect) {
+    modeSelect.addEventListener("change", forceHomeToolsDisplay);
+  }
+});
