@@ -1745,7 +1745,6 @@ if (shareSiteBtn) {
     }
   });
 }
-
 function initCollapsiblePanels() {
   const toggles = document.querySelectorAll(".collapse-toggle");
 
