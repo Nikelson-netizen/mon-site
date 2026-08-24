@@ -2,11 +2,52 @@ const board = document.getElementById("board");
 const resetButton = document.getElementById("reset");
 const status = document.getElementById("status");
 
+const tournamentTurnTimer =
+  document.getElementById(
+    "tournamentTurnTimer"
+  );
+
+const tournamentTurnTimerValue =
+  document.getElementById(
+    "tournamentTurnTimerValue"
+  );
+
+let tournamentTimerInterval = null;
+let tournamentTurnDeadline = null;
+let currentFinishedTournamentCode = null;
+
+if (tournamentTurnTimer) {
+  tournamentTurnTimer.hidden = true;
+}
+
+if (tournamentTurnTimerValue) {
+  tournamentTurnTimerValue.textContent = "02:00";
+}
+
 const modeSelect = document.getElementById("mode");
 const aiSelect = document.getElementById("aiLevel");
 const firstPlayerSelect = document.getElementById("firstPlayer");
 
 const playerNameInput = document.getElementById("playerName");
+const localMoveHistory = [];
+let localUndoAvailable = false;
+const undoLastMoveBtn =
+  document.getElementById("undoLastMoveBtn");
+
+const tournamentMatchesSection =
+  document.getElementById("tournamentMatchesSection");
+
+const tournamentMatchesHeader =
+  document.getElementById("tournamentMatchesHeader");
+
+const tournamentMatchesContent =
+  document.getElementById("tournamentMatchesContent");
+
+const tournamentMatchesToggle =
+  document.getElementById("tournamentMatchesToggle");
+
+const tournamentMatchesList =
+  document.getElementById("tournamentMatchesList");
 
 if (playerNameInput) {
   playerNameInput.value = "";
@@ -47,6 +88,10 @@ const onlineInfo = document.getElementById("onlineInfo");
 const onlinePlayersBox = document.getElementById("onlinePlayers");
 const publicMatchesBox = document.getElementById("publicMatches");
 const scoreText = document.getElementById("scoreText");
+const shareContainer =
+  document.getElementById(
+    "shareContainer"
+  );
 
 const leaveMatchButton = document.getElementById("leaveMatch");
 if (leaveMatchButton) {
@@ -68,10 +113,50 @@ const inviteText = document.getElementById("inviteText");
 const acceptInviteButton = document.getElementById("acceptInvite");
 const declineInviteButton = document.getElementById("declineInvite");
 
-const chatBox = document.getElementById("chatBox");
-const chatHeader = document.getElementById("chatHeader");
-const chatContent = document.getElementById("chatContent");
-const challengeBtn = document.getElementById("challengeBtn");
+const chatContainer =
+  document.getElementById("chatContainer");
+
+const chatBox =
+  document.getElementById("chatBox");
+
+const chatHeader =
+  document.getElementById("chatHeader");
+
+const chatContent =
+  document.getElementById("chatContent");
+
+const challengeBtn =
+  document.getElementById("challengeBtn");
+
+const tournamentTrophyOverlay =
+  document.getElementById(
+    "tournamentTrophyOverlay"
+  );
+
+const trophyChampion =
+  document.getElementById(
+    "trophyChampion"
+  );
+
+const trophyRunnerUp =
+  document.getElementById(
+    "trophyRunnerUp"
+  );
+
+const trophyThirdPlace =
+  document.getElementById(
+    "trophyThirdPlace"
+  );
+
+const trophyFinalScore =
+  document.getElementById(
+    "trophyFinalScore"
+  );
+
+const closeTournamentBtn =
+  document.getElementById(
+    "closeTournamentBtn"
+  );
 
 const isChallengeMode = localStorage.getItem("challengeMode");
 const challengeLevel = localStorage.getItem("challengeLevel");
@@ -150,17 +235,61 @@ if (chatBox) {
   chatBox.innerHTML = "Aucun message...";
 }
 
-if (chatHeader && chatContent) {
-  chatHeader.addEventListener("click", () => {
-    const isHidden =
-      chatContent.style.display === "none" ||
-      getComputedStyle(chatContent).display === "none";
+if (
+  chatContainer &&
+  chatHeader &&
+  chatContent
+) {
+  /*
+   * Le chat commence fermé :
+   * seule la petite barre Chat apparaît.
+   */
+  chatContent.style.display = "none";
 
-    chatContent.style.display = isHidden ? "block" : "none";
-  });
+  chatContainer.classList.add(
+    "chat-collapsed"
+  );
+
+  chatContainer.classList.remove(
+    "chat-open"
+  );
+
+  chatHeader.addEventListener(
+    "click",
+    () => {
+      const isClosed =
+        getComputedStyle(
+          chatContent
+        ).display === "none";
+
+      if (isClosed) {
+        chatContent.style.display =
+          "block";
+
+        chatContainer.classList.remove(
+          "chat-collapsed"
+        );
+
+        chatContainer.classList.add(
+          "chat-open"
+        );
+      } else {
+        chatContent.style.display =
+          "none";
+
+        chatContainer.classList.remove(
+          "chat-open"
+        );
+
+        chatContainer.classList.add(
+          "chat-collapsed"
+        );
+      }
+    }
+  );
 }
 
-const placeSound = new Audio("/click.mp3");
+const placeSound = new Audio("/sounds/click.mp3");
 placeSound.preload = "auto";
 
 function playPlaceSound() {
@@ -182,6 +311,7 @@ let winningLine = [];
 let cells = [];
 let isWatching = false;
 let watchingMatchId = null;
+let isTournamentMatchActive = false;
 let winnerAlreadyCounted = false;
 
 let matchScore = {
@@ -243,6 +373,274 @@ function resetMatchScore() {
   winnerAlreadyCounted = false;
 
   renderMatchScore();
+}
+
+function updateModeSpecificUI() {
+  const mode = modeSelect?.value || "pvp";
+  const isTournamentMode =
+    mode === "tournament";
+
+  if (
+    !isTournamentMode ||
+    !isTournamentMatchActive ||
+    gameOver
+  ) {
+    stopTournamentCountdown(true);
+
+    if (tournamentTurnTimerValue) {
+      tournamentTurnTimerValue.textContent =
+        "02:00";
+    }
+  }
+
+  if (challengeBtn) {
+    const challengeAllowed =
+      mode === "ai" ||
+      mode === "pvp" ||
+      mode === "twoPlayers";
+
+    challengeBtn.style.display =
+      challengeAllowed &&
+      !isTournamentMode
+        ? "inline-flex"
+        : "none";
+  }
+}
+
+if (closeTournamentBtn) {
+  closeTournamentBtn.addEventListener(
+    "click",
+    () => {
+      if (!socket) {
+        alert(
+          "The server is not connected."
+        );
+        return;
+      }
+
+      const tournamentCode =
+        currentFinishedTournamentCode ||
+        tournamentCodeInput?.value
+          .trim()
+          .toUpperCase();
+
+      if (!tournamentCode) {
+        alert(
+          "Tournament code not found."
+        );
+        return;
+      }
+
+      const confirmed =
+        window.confirm(
+          "Close this tournament for all players?"
+        );
+
+      if (!confirmed) return;
+
+      closeTournamentBtn.disabled = true;
+      closeTournamentBtn.textContent =
+        "Closing...";
+
+      socket.emit(
+        "closeTournament",
+        {
+          code: tournamentCode
+        }
+      );
+    }
+  );
+}
+
+function hideTournamentTrophy() {
+  stopTournamentConfetti();
+  
+  if (tournamentTrophyOverlay) {
+    tournamentTrophyOverlay.hidden = true;
+  }
+
+  if (closeTournamentBtn) {
+    closeTournamentBtn.hidden = true;
+  }
+
+  if (trophyChampion) {
+    trophyChampion.textContent = "—";
+  }
+
+  if (trophyRunnerUp) {
+    trophyRunnerUp.textContent = "—";
+  }
+
+  if (trophyThirdPlace) {
+    trophyThirdPlace.textContent = "—";
+  }
+
+  if (trophyFinalScore) {
+    trophyFinalScore.textContent = "—";
+  }
+}
+
+  let tournamentConfettiInterval = null;
+
+function stopTournamentConfetti() {
+  if (tournamentConfettiInterval) {
+    clearInterval(tournamentConfettiInterval);
+    tournamentConfettiInterval = null;
+  }
+
+  const confettiContainer =
+    document.getElementById("tournamentConfetti");
+
+  if (confettiContainer) {
+    confettiContainer.remove();
+  }
+}
+
+function launchTournamentConfetti() {
+  stopTournamentConfetti();
+
+  const confettiContainer =
+    document.createElement("div");
+
+  confettiContainer.id = "tournamentConfetti";
+  document.body.appendChild(confettiContainer);
+
+  const symbols = [
+    "🎉",
+    "🎊",
+    "✨",
+    "⭐"
+  ];
+
+  function createConfettiPiece() {
+    const confetti =
+      document.createElement("span");
+
+    confetti.className =
+      "tournament-confetti-piece";
+
+    confetti.textContent =
+      symbols[
+        Math.floor(
+          Math.random() * symbols.length
+        )
+      ];
+
+    confetti.style.left =
+      `${Math.random() * 100}%`;
+
+    confetti.style.animationDuration =
+      `${4 + Math.random() * 3}s`;
+
+    confetti.style.fontSize =
+      `${14 + Math.random() * 16}px`;
+
+    confettiContainer.appendChild(confetti);
+
+    setTimeout(() => {
+      confetti.remove();
+    }, 7500);
+  }
+
+  // Première vague immédiate
+  for (let i = 0; i < 40; i++) {
+    setTimeout(
+      createConfettiPiece,
+      Math.random() * 1500
+    );
+  }
+
+  // Continuer jusqu'à Close Tournament
+  tournamentConfettiInterval =
+    setInterval(() => {
+      for (let i = 0; i < 8; i++) {
+        setTimeout(
+          createConfettiPiece,
+          Math.random() * 1000
+        );
+      }
+    }, 1000);
+}
+
+function showTournamentTrophy({
+  champion,
+  runnerUp,
+  thirdPlace,
+  finalMatch,
+  organizer
+}) {
+  if (!tournamentTrophyOverlay) {
+    return;
+  }
+
+  stopTournamentCountdown(true);
+
+  gameOver = true;
+  isTournamentMatchActive = false;
+
+  lockBoard();
+
+  if (challengeBtn) {
+    challengeBtn.style.display = "none";
+  }
+
+  if (resetButton) {
+    resetButton.style.display = "none";
+  }
+
+  if (shareContainer) {
+    shareContainer.style.display = "none";
+  }
+
+  if (trophyChampion) {
+    trophyChampion.textContent =
+      champion || "—";
+  }
+
+  if (trophyRunnerUp) {
+    trophyRunnerUp.textContent =
+      runnerUp || "—";
+  }
+
+  if (trophyThirdPlace) {
+    trophyThirdPlace.textContent =
+      thirdPlace || "—";
+  }
+
+  if (trophyFinalScore) {
+    if (finalMatch) {
+      trophyFinalScore.textContent =
+        `${finalMatch.player1} ` +
+        `${finalMatch.player1Wins} - ` +
+        `${finalMatch.player2Wins} ` +
+        `${finalMatch.player2}`;
+    } else {
+      trophyFinalScore.textContent = "—";
+    }
+  }
+
+  const currentTournamentPlayerName =
+    tournamentPlayerNameInput?.value
+      .trim() || "";
+
+  const isOrganizer =
+    currentTournamentPlayerName ===
+    organizer;
+
+  if (closeTournamentBtn) {
+    closeTournamentBtn.hidden =
+      !isOrganizer;
+  }
+
+  tournamentTrophyOverlay.hidden = false;
+
+launchTournamentConfetti();
+
+if (status) {
+  status.textContent =
+    `🏆 Tournament Finished — ` +
+    `Champion: ${champion}`;
+}
 }
 
 function clearWinnerClasses() {
@@ -340,7 +738,6 @@ function showWinner(winnerName) {
 
   resetButton.textContent = "Play Again";
 
-  const shareContainer = document.getElementById("shareContainer");
   const shareBtn = document.getElementById("shareMatchBtn");
 
   if (shareContainer) {
@@ -354,13 +751,23 @@ function showWinner(winnerName) {
   }
 
   if (challengeBtn) {
-    challengeBtn.textContent = "🔥 Challenge Me";
-    challengeBtn.style.display = "inline-block";
+  const challengeAllowed =
+    modeSelect.value === "ai" ||
+    modeSelect.value === "pvp" ||
+    modeSelect.value === "twoPlayers";
 
-    const humanWonVsAI =
-      challengeSessionActive &&
-      modeSelect.value === "ai" &&
-      winnerName === getPlayerDisplayName(HUMAN_PLAYER);
+  if (!challengeAllowed || isTournamentMatchActive) {
+    challengeBtn.style.display = "none";
+  } else {
+    challengeBtn.textContent = "🔥 Challenge Me";
+    challengeBtn.style.display = "inline-flex";
+  }
+
+  const humanWonVsAI =
+    challengeAllowed &&
+    challengeSessionActive &&
+    modeSelect.value === "ai" &&
+    winnerName === getPlayerDisplayName(HUMAN_PLAYER);
 
     if (humanWonVsAI) {
       challengeBtn.onclick = () => {
@@ -374,11 +781,13 @@ function showWinner(winnerName) {
         localStorage.setItem("challengeResult", JSON.stringify(data));
         window.location.href = "challenge.html";
       };
-    } else {
-      challengeBtn.onclick = () => {
-        window.location.href = "challenge.html";
-      };
-    }
+    } else if (challengeAllowed) {
+  challengeBtn.onclick = () => {
+    window.location.href = "challenge.html";
+  };
+} else {
+  challengeBtn.onclick = null;
+}
   }
 }
 
@@ -563,14 +972,79 @@ function checkWinWithLine(player) {
 let unreadCount = 0;
 
 function sendMessage() {
-  const input = document.getElementById("chatInput");
-  if (!input || !socket) return;
+  const input =
+    document.getElementById(
+      "chatInput"
+    );
 
-  const msg = input.value.trim();
-  if (!msg) return;
+  if (!input || !socket) {
+    return;
+  }
 
-  socket.emit("sendMessage", msg);
+  const message =
+    input.value.trim();
+
+  if (!message) {
+    return;
+  }
+
+  /*
+   * Même interface, mais événement
+   * différent selon le mode.
+   */
+  if (
+    modeSelect.value ===
+    "tournament"
+  ) {
+    socket.emit(
+      "sendTournamentMessage",
+      {
+        message
+      }
+    );
+  } else if (
+    modeSelect.value ===
+    "online"
+  ) {
+    /*
+     * Conserver le format attendu
+     * par ton ancien serveur.
+     */
+    socket.emit(
+      "sendMessage",
+      message
+    );
+  } else {
+    return;
+  }
+
   input.value = "";
+}
+
+function updateChatMode() {
+  const chatHeader =
+    document.getElementById(
+      "chatHeader"
+    );
+
+  const chatBox =
+    document.getElementById(
+      "chatBox"
+    );
+
+  if (!chatHeader) {
+    return;
+  }
+
+  chatHeader.innerHTML =
+  '💬 Chat <span id="chatBadge"></span>';
+
+  unreadCount = 0;
+
+  if (chatBox) {
+    chatBox.innerHTML =
+      "Aucun message...";
+  }
 }
 
 function addChatMessage(name, message) {
@@ -578,10 +1052,6 @@ function addChatMessage(name, message) {
   const chatContentLocal = document.getElementById("chatContent");
 
   if (!box) return;
-
-  if (chatContentLocal) {
-    chatContentLocal.style.display = "block";
-  }
 
   if (box.textContent.trim() === "Aucun message...") {
     box.innerHTML = "";
@@ -665,6 +1135,98 @@ async function shareMatchImage(winnerName) {
     }
   } catch (error) {
     console.error("Share image error:", error);
+  }
+}
+
+function forceHomeToolsDisplay() {
+  const modeSelect =
+    document.getElementById("mode");
+
+  if (!modeSelect) return;
+
+  const mode = modeSelect.value;
+
+  const aiTools =
+    document.querySelectorAll(".ai-tool");
+
+  const onlineTools =
+    document.querySelectorAll(".online-tool");
+
+  const pvpTools =
+    document.querySelectorAll(".pvp-tool");
+
+  const tournamentTools =
+    document.querySelectorAll(
+      ".tournament-tool"
+    );
+
+  aiTools.forEach((el) => {
+    el.style.display = "none";
+  });
+
+  onlineTools.forEach((el) => {
+    el.style.display = "none";
+  });
+
+  pvpTools.forEach((el) => {
+    el.style.display = "none";
+  });
+
+  tournamentTools.forEach((el) => {
+    el.style.display = "none";
+  });
+
+  if (mode === "ai") {
+    aiTools.forEach((el) => {
+      el.style.display = "";
+    });
+
+    pvpTools.forEach((el) => {
+      el.style.display = "";
+    });
+  }
+
+  if (mode === "online") {
+    onlineTools.forEach((el) => {
+      el.style.display = "";
+    });
+
+    if (mode === "online" && resetButton) {
+  resetButton.style.display = "inline-block";
+}
+  }
+
+  if (mode === "pvp") {
+    pvpTools.forEach((el) => {
+      el.style.display = "";
+    });
+  }
+
+  if (mode === "tournament") {
+    tournamentTools.forEach((el) => {
+      el.style.display = "";
+    });
+  }
+
+  if (chatContainer) {
+    const showChat =
+      mode === "online" ||
+      mode === "tournament";
+
+    chatContainer.style.display =
+      showChat ? "block" : "none";
+  }
+
+  if (inviteBox && mode !== "online") {
+    inviteBox.style.display = "none";
+  }
+
+  const onlinePanel =
+    document.querySelector(".online-panel");
+
+  if (onlinePanel) {
+    onlinePanel.style.display =
+      mode === "online" ? "" : "none";
   }
 }
 
@@ -828,7 +1390,30 @@ function handleMove(i) {
   if (grid[i]) return;
   if (isWatching) return;
 
-  if (modeSelect.value === "online") {
+  if (
+  modeSelect.value === "tournament" &&
+  !isTournamentMatchActive
+) {
+  status.textContent =
+    "⏳ Wait until both players have joined the match.";
+  lockBoard();
+  return;
+}
+
+if (
+  modeSelect.value === "online" &&
+  !myColor
+) {
+  status.textContent =
+    "⏳ Wait until your opponent accepts the match.";
+  lockBoard();
+  return;
+}
+
+  if (
+  modeSelect.value === "online" ||
+  isTournamentMatchActive
+) {
     if (!socket) return;
     if (!myColor) return;
 
@@ -853,6 +1438,8 @@ function handleMove(i) {
   if (modeSelect.value === "ai" && currentPlayer === AI_PLAYER) return;
 
   grid[i] = currentPlayer;
+  localMoveHistory.push(i);
+  localUndoAvailable = true;
   placeStoneVisual(i, currentPlayer);
   playPlaceSound();
 
@@ -889,6 +1476,9 @@ function handleAIMove(i) {
   if (i == null || grid[i]) return;
 
   grid[i] = currentPlayer;
+  localMoveHistory.push(i);
+  localUndoAvailable = true;
+
   placeStoneVisual(i, currentPlayer);
   playPlaceSound();
 
@@ -942,6 +1532,7 @@ function maybePlayAI() {
 
 // ----------------- ONLINE UI -----------------
 function initOnlineUI() {
+
   if (onlinePlayersBox) onlinePlayersBox.innerHTML = "No players online";
   if (publicMatchesBox) publicMatchesBox.innerHTML = "No public matches";
 
@@ -1113,6 +1704,104 @@ if (matchesStatus) {
 }
 
 // ----------------- SOCKET -----------------
+
+function formatTournamentTime(
+  milliseconds
+) {
+  const totalSeconds = Math.max(
+    0,
+    Math.ceil(milliseconds / 1000)
+  );
+
+  const minutes = Math.floor(
+    totalSeconds / 60
+  );
+
+  const seconds =
+    totalSeconds % 60;
+
+  return (
+    String(minutes).padStart(2, "0") +
+    ":" +
+    String(seconds).padStart(2, "0")
+  );
+}
+
+function stopTournamentCountdown(hideTimer = false) {
+  if (tournamentTimerInterval) {
+    clearInterval(tournamentTimerInterval);
+    tournamentTimerInterval = null;
+  }
+
+  tournamentTurnDeadline = null;
+
+  if (tournamentTurnTimer && hideTimer) {
+    tournamentTurnTimer.hidden = true;
+    tournamentTurnTimer.style.display = "none";
+  }
+}
+
+function updateTournamentCountdown() {
+  if (
+    !tournamentTurnDeadline ||
+    !tournamentTurnTimerValue
+  ) {
+    return;
+  }
+
+  const remainingTime =
+    tournamentTurnDeadline -
+    Date.now();
+
+  tournamentTurnTimerValue.textContent =
+    formatTournamentTime(
+      remainingTime
+    );
+
+  if (remainingTime <= 0) {
+    tournamentTurnTimerValue.textContent =
+      "00:00";
+
+    stopTournamentCountdown(false);
+  }
+}
+
+function startTournamentCountdown(deadline) {
+  stopTournamentCountdown(false);
+
+  /*
+   * Ne jamais afficher le timer en dehors
+   * d’une partie active du tournoi.
+   */
+  if (
+    modeSelect.value !== "tournament" ||
+    !isTournamentMatchActive ||
+    gameOver
+  ) {
+    stopTournamentCountdown(true);
+    return;
+  }
+
+  tournamentTurnDeadline = Number(deadline);
+
+  if (!Number.isFinite(tournamentTurnDeadline)) {
+    stopTournamentCountdown(true);
+    return;
+  }
+
+  if (tournamentTurnTimer) {
+  tournamentTurnTimer.hidden = false;
+  tournamentTurnTimer.style.display = "";
+}
+
+  updateTournamentCountdown();
+
+  tournamentTimerInterval = setInterval(
+    updateTournamentCountdown,
+    250
+  );
+}
+
 function initSocket() {
   if (typeof io === "undefined") {
     console.warn("Socket.IO not loaded yet.");
@@ -1120,6 +1809,485 @@ function initSocket() {
   }
 
   socket = io();
+
+  socket.on("tournamentCreated", ({ tournament }) => {
+  tournamentInfo.innerHTML = `
+🏆 ${tournament.name}<br>
+👑  Organizer: ${tournament.organizer || tournament.creator}<br>
+Code: ${tournament.code}
+`;
+playersContent.style.display = "block";
+playersToggle.textContent = "▼";
+
+const startTournamentBtn = document.getElementById("startTournamentBtn");
+
+if (startTournamentBtn) {
+  startTournamentBtn.style.display = "inline-block";
+}
+
+  renderTournamentPlayers(tournament);
+});
+
+socket.on(
+  "tournamentColorChanged",
+  ({ color }) => {
+    myColor = color;
+  }
+);
+
+socket.on(
+  "tournamentTurnTimerStopped",
+  () => {
+    stopTournamentCountdown(true);
+
+    if (tournamentTurnTimerValue) {
+      tournamentTurnTimerValue.textContent =
+        "02:00";
+    }
+  }
+);
+
+socket.on(
+  "tournamentTurnTimerStarted",
+  ({
+    deadline,
+    currentPlayerName
+  }) => {
+    if (
+      modeSelect.value !== "tournament" ||
+      !isTournamentMatchActive ||
+      gameOver
+    ) {
+      stopTournamentCountdown(true);
+      return;
+    }
+
+    startTournamentCountdown(deadline);
+
+    if (status) {
+      status.textContent =
+        `⏱️ ${currentPlayerName}'s turn`;
+    }
+  }
+);
+
+socket.on(
+  "tournamentTurnExpired",
+  ({
+    loserName,
+    winnerName,
+    message
+  }) => {
+    stopTournamentCountdown(false);
+
+    if (tournamentTurnTimerValue) {
+      tournamentTurnTimerValue.textContent =
+        "00:00";
+    }
+
+    if (status) {
+      status.textContent =
+        message ||
+        `⏱️ ${loserName} a dépassé le temps. ` +
+        `${winnerName} gagne la partie.`;
+    }
+  }
+);
+
+socket.on(
+  "tournamentSeriesFinished",
+  ({
+    winnerName,
+    player1,
+    player2,
+    player1Wins,
+    player2Wins,
+    standings
+  }) => {
+
+    stopTournamentCountdown(true);
+
+    gameOver = true;
+
+    status.textContent =
+      `🏆 ${winnerName} wins the series! ` +
+      `${player1} ${player1Wins} - ` +
+      `${player2Wins} ${player2}`;
+
+    renderTournamentStandings(
+      standings
+    );
+  }
+);
+
+socket.on(
+  "tournamentFinished",
+  ({
+    tournamentCode,
+    tournamentName,
+    organizer,
+    champion,
+    runnerUp,
+    thirdPlace,
+    standings,
+    finalMatch
+  }) => {
+    currentFinishedTournamentCode =
+  tournamentCode;
+    console.log(
+      "🏆 Tournament completely finished:",
+      {
+        tournamentCode,
+        tournamentName,
+        organizer,
+        champion,
+        runnerUp,
+        thirdPlace,
+        finalMatch
+      }
+    );
+
+    showTournamentTrophy({
+      champion,
+      runnerUp,
+      thirdPlace,
+      finalMatch,
+      organizer
+    });
+
+    /*
+     * Afficher le classement final
+     * après quelques secondes.
+     */
+    setTimeout(() => {
+      renderTournamentStandings(
+        standings || []
+      );
+
+      if (
+        tournamentStandingsContent
+      ) {
+        tournamentStandingsContent
+          .scrollIntoView({
+            behavior: "smooth",
+            block: "center"
+          });
+      }
+    }, 5000);
+  }
+);
+
+socket.on(
+  "tournamentClosed",
+  ({
+    tournamentCode,
+    message
+  }) => {
+    console.log(
+      "🏁 Tournament closed:",
+      tournamentCode
+    );
+
+    stopTournamentConfetti();
+    hideTournamentTrophy();
+    stopTournamentCountdown(true);
+
+    currentFinishedTournamentCode =
+      null;
+
+    isTournamentMatchActive =
+      false;
+
+    myColor = null;
+    gameOver = false;
+    isWatching = false;
+    watchingMatchId = null;
+
+    if (closeTournamentBtn) {
+      closeTournamentBtn.disabled =
+        false;
+
+      closeTournamentBtn.textContent =
+        "🏁 Close Tournament";
+
+      closeTournamentBtn.hidden =
+        true;
+    }
+
+    if (tournamentPlayerNameInput) {
+      tournamentPlayerNameInput.value =
+        "";
+    }
+
+    if (tournamentNameInput) {
+      tournamentNameInput.value =
+        "";
+    }
+
+    if (tournamentCodeInput) {
+      tournamentCodeInput.value =
+        "";
+    }
+
+    if (tournamentInfo) {
+      tournamentInfo.textContent =
+        "Organizer creates a tournament. " +
+        "Players join with the code.";
+    }
+
+    const tournamentPlayersList =
+      document.getElementById(
+        "tournamentPlayersList"
+      );
+
+    if (tournamentPlayersList) {
+      tournamentPlayersList.innerHTML =
+        "";
+    }
+
+    if (tournamentMatchesList) {
+      tournamentMatchesList.innerHTML =
+        "";
+    }
+
+    if (tournamentMatchesSection) {
+      tournamentMatchesSection.style
+        .display = "none";
+    }
+
+    if (tournamentStandingsContent) {
+      tournamentStandingsContent
+        .textContent =
+        "Standings will appear after a series.";
+    }
+
+    /*
+     * Retourner automatiquement tout le
+     * monde au mode 2 Players.
+     */
+    modeSelect.value = "pvp";
+
+    modeSelect.dispatchEvent(
+      new Event("change")
+    );
+
+    if (status) {
+      status.textContent =
+        message ||
+        "🏁 Tournament closed.";
+    }
+  }
+);
+
+socket.on(
+  "tournamentSeriesClosed",
+  ({
+    board: emptyBoard,
+    winnerName,
+    player1,
+    player2,
+    player1Wins,
+    player2Wins
+  }) => {
+    /*
+ * Ne pas vider la grille.
+ * On conserve le dernier match qui a donné la victoire.
+ */
+gameOver = true;
+isTournamentMatchActive = false;
+winnerAlreadyCounted = true;
+
+highlightWinningLineFromBoard();
+lockBoard();
+
+    gameOver = true;
+    currentPlayer = "black";
+    myColor = null;
+    isTournamentMatchActive = false;
+    winnerAlreadyCounted = true;
+
+    lockBoard();
+
+    document.body.classList.remove(
+      "white-turn"
+    );
+
+    const shareContainer =
+  document.getElementById(
+    "shareContainer"
+  );
+
+if (shareContainer) {
+  shareContainer.style.display = "none";
+}
+
+    status.textContent =
+      `🏆 ${winnerName} wins the series! ` +
+      `${player1} ${player1Wins} - ` +
+      `${player2Wins} ${player2}`;
+
+    console.log(
+      "✅ Tournament grid cleared"
+    );
+  }
+);
+
+socket.on("tournamentJoined", ({ tournament }) => {
+  tournamentInfo.innerHTML = `
+🏆 ${tournament.name}<br>
+👑  Organizer: ${tournament.organizer || tournament.creator}<br>
+Code: ${tournament.code}
+`;
+playersContent.style.display = "block";
+playersToggle.textContent = "▼";
+
+  renderTournamentPlayers(tournament);
+});
+
+socket.on("tournamentUpdated", (tournament) => {
+
+  playersContent.style.display = "block";
+playersToggle.textContent = "▼";
+
+renderTournamentPlayers(tournament);
+renderTournamentMatches(tournament);
+
+renderTournamentStandings(
+  tournament.standings || []
+);
+
+});
+
+socket.on("tournamentStarted", (tournament) => {
+hideTournamentTrophy();
+  console.log("Tournament started:", tournament);
+
+  if (startTournamentBtn) {
+    startTournamentBtn.style.display = "none";
+  }
+
+  tournamentInfo.innerHTML = `
+    🏆 ${tournament.name}<br>
+    👑 Organizer: ${tournament.organizer || tournament.creator}<br>
+    Code: ${tournament.code}<br>
+    ✅ Tournament started<br>
+    Matches generated: ${tournament.matches?.length || 0}
+  `;
+
+  renderTournamentPlayers(tournament);
+  renderTournamentMatches(tournament);
+});
+
+socket.on("tournamentMatchRoomUpdated", ({
+  tournamentCode,
+  roomId,
+  match
+}) => {
+  console.log("Tournament match room updated:", {
+    tournamentCode,
+    roomId,
+    match
+  });
+
+  if (!match) return;
+
+  const myName =
+    tournamentPlayerNameInput?.value.trim() || "";
+
+  const opponentName =
+    myName === match.player1
+      ? match.player2
+      : match.player1;
+
+  if (match.joinedPlayers?.length >= 2) {
+    status.textContent =
+      `✅ ${match.player1} vs ${match.player2} — Match ready`;
+
+    alert(
+      `${match.player1} and ${match.player2} are ready to play.`
+    );
+  } else {
+    status.textContent =
+      `⏳ Waiting for ${opponentName} to click Play`;
+
+    alert(
+      `You joined the match room. Waiting for ${opponentName}.`
+    );
+  }
+});
+
+socket.on(
+  "tournamentWaitingForOpponent",
+  ({
+    matchId,
+    playerName,
+    opponentName
+  }) => {
+    lockBoard();
+    status.textContent =
+      `⏳ Waiting for ${opponentName} to join`;
+
+    const button = document.querySelector(
+      `.playTournamentMatchBtn[data-match-id="${matchId}"]`
+    );
+
+    if (button) {
+      button.textContent =
+        `⏳ Waiting for ${opponentName}`;
+
+      button.disabled = true;
+    }
+
+    console.log(
+      `${playerName} is waiting for ${opponentName}`
+    );
+  }
+);
+
+socket.on(
+  "tournamentOpponentWaiting",
+  ({
+    tournamentCode,
+    matchId,
+    waitingPlayer
+  }) => {
+    lockBoard();
+
+gameOver = false;
+myColor = null;
+isTournamentMatchActive = false;
+    const myName =
+      tournamentPlayerNameInput?.value
+        .trim() || "";
+
+    status.textContent =
+      `🎮 ${waitingPlayer} is ready to play against you`;
+
+    const button = document.querySelector(
+      `.playTournamentMatchBtn[data-match-id="${matchId}"]`
+    );
+
+    if (button) {
+      button.textContent =
+        `▶️ Join ${waitingPlayer}`;
+
+      button.disabled = false;
+    }
+
+    alert(
+      `${waitingPlayer} is ready to play against you.`
+    );
+
+    console.log(
+      `${waitingPlayer} is waiting for ${myName} ` +
+      `in tournament ${tournamentCode}`
+    );
+  }
+);
+
+socket.on("tournamentError", ({ message }) => {
+  alert(message);
+});
 
   socket.on("connect", () => {
     console.log("✅ Connected to server:", socket.id);
@@ -1140,6 +2308,82 @@ function initSocket() {
       }
     }
   });
+
+  socket.on(
+  "receiveTournamentMessage",
+  ({
+    tournamentCode,
+    name,
+    message,
+    role
+  }) => {
+    if (
+      modeSelect.value !==
+      "tournament"
+    ) {
+      return;
+    }
+
+    const currentCode =
+      tournamentCodeInput?.value
+        .trim()
+        .toUpperCase() || "";
+
+    /*
+     * Sécurité supplémentaire côté client :
+     * ne pas afficher le message si le code
+     * ne correspond pas au tournoi ouvert.
+     */
+    if (
+      currentCode &&
+      tournamentCode !==
+        currentCode
+    ) {
+      return;
+    }
+
+    const displayName =
+      role === "organizer"
+        ? `👑 ${name}`
+        : name;
+
+    addChatMessage(
+      displayName,
+      message
+    );
+
+    const myName =
+      tournamentPlayerNameInput?.value
+        .trim() || "";
+
+    if (name !== myName) {
+      unreadCount++;
+
+      const badge =
+        document.getElementById(
+          "chatBadge"
+        );
+
+      if (badge) {
+        badge.style.display =
+          "inline-block";
+
+        badge.textContent =
+          unreadCount;
+      }
+    }
+  }
+);
+
+socket.on(
+  "tournamentChatError",
+  ({ message }) => {
+    alert(
+      message ||
+      "Tournament chat error."
+    );
+  }
+);
 
   socket.on("onlinePlayers", (players) => {
     renderOnlinePlayers(players);
@@ -1199,11 +2443,19 @@ function initSocket() {
   currentPlayer: watchedCurrentPlayer,
   gameOver: watchedGameOver,
   winnerName,
-  matchScore: serverMatchScore
+  matchScore: serverMatchScore,
+  isTournamentMatch,
+  organizerWatching,
+  turnDeadline
 }) => {
   isWatching = true;
   watchingMatchId = matchId;
   myColor = null;
+  isTournamentMatchActive =
+  isTournamentMatch === true;
+
+const isOrganizerWatching =
+  organizerWatching === true;
   gameOver = !!watchedGameOver;
   winnerAlreadyCounted = true;
   lastMoveIndex = null;
@@ -1225,6 +2477,18 @@ function initSocket() {
 
   renderMatchScore();
 
+  if (
+  isTournamentMatchActive &&
+  turnDeadline &&
+  !gameOver
+) {
+  startTournamentCountdown(
+    turnDeadline
+  );
+} else {
+  stopTournamentCountdown(true);
+}
+
   document.body.classList.add("watching-mode");
   board.classList.add("spectator-board");
   document.body.classList.toggle("white-turn", currentPlayer === "white");
@@ -1233,13 +2497,18 @@ function initSocket() {
     leaveMatchButton.textContent = "Leave Watch";
   }
 
-  if (gameOver) {
-    lockBoard();
-    if (winnerName) showWinner(winnerName);
-  } else {
-    unlockBoard();
-    status.textContent = `👀 Watching ${currentBlackName} vs ${currentWhiteName}`;
+  lockBoard();
+
+if (gameOver) {
+  if (winnerName) {
+    highlightWinningLineFromBoard();
   }
+} else {
+  status.textContent =
+    isOrganizerWatching
+      ? `👑 Referee watching ${currentBlackName} vs ${currentWhiteName}`
+      : `👀 Watching ${currentBlackName} vs ${currentWhiteName}`;
+}
 
   renderPublicMatches(publicMatches);
 });
@@ -1252,8 +2521,28 @@ function initSocket() {
   board: matchBoard,
   currentPlayer: serverCurrentPlayer,
   winnerName,
-  matchScore: serverMatchScore
+  matchScore: serverMatchScore,
+  isTournamentMatch
 }) => {
+stopTournamentCountdown(true);
+
+if (
+  modeSelect.value === "online" &&
+  resetButton
+) {
+  resetButton.style.display = "none";
+  resetButton.textContent = "Restart";
+}
+
+if (tournamentTurnTimerValue) {
+  tournamentTurnTimerValue.textContent = "02:00";
+}
+
+isTournamentMatchActive =
+  modeSelect.value === "tournament" &&
+  isTournamentMatch === true;
+
+updateModeSpecificUI();
     document.body.classList.remove("watching-mode");
     board.classList.remove("spectator-board");
     isWatching = false;
@@ -1293,6 +2582,43 @@ function initSocket() {
       status.textContent = `Opponent's turn vs ${opponentName || "Opponent"}`;
     }
   });
+
+  socket.on("onlineUndoApplied", ({
+  board: serverBoard,
+  currentPlayer: serverCurrentPlayer,
+  blackName,
+  whiteName,
+  matchScore: serverMatchScore
+}) => {
+  grid = [...serverBoard];
+
+  currentPlayer = serverCurrentPlayer;
+
+  currentBlackName =
+    blackName || currentBlackName;
+
+  currentWhiteName =
+    whiteName || currentWhiteName;
+
+  matchScore =
+    serverMatchScore || matchScore;
+
+  gameOver = false;
+  winnerAlreadyCounted = false;
+  winningLine = [];
+  lastMoveIndex = null;
+
+  buildBoard();
+  renderMatchScore();
+
+  document.body.classList.toggle(
+    "white-turn",
+    currentPlayer === "white"
+  );
+
+  unlockBoard();
+  updateTurnStatus();
+});
 
   socket.on("movePlayed", ({ index, player }) => {
     if (gameOver) return;
@@ -1402,6 +2728,23 @@ function initSocket() {
   lockBoard();
   renderMatchScore();
   showWinner(winnerName);
+
+  console.log("🔥 GAME WON RECEIVED", {
+  winnerName,
+  mode: modeSelect.value,
+  goOnlineButton
+});
+
+if (
+  modeSelect.value === "online" &&
+  goOnlineButton
+) {
+  console.log("✅ SETTING PLAY AGAIN");
+
+  goOnlineButton.textContent = "▶️ Play Again";
+  goOnlineButton.dataset.action = "playAgain";
+  goOnlineButton.classList.add("play-again");
+}
 });
 
   socket.on("onlineGameReset", ({
@@ -1411,12 +2754,24 @@ function initSocket() {
   whiteName,
   gameOver: serverGameOver,
   winnerName,
-  matchScore: serverMatchScore
+  matchScore: serverMatchScore,
+  isTournamentMatch
 }) => {
-    unlockBoard();
 
-    resetButton.textContent = "Restart";
-    resetButton.style.background = "";
+  if (isTournamentMatch) {
+    stopTournamentCountdown(true);
+  }
+
+  unlockBoard();
+
+  resetButton.textContent = "Restart";
+  resetButton.style.background = "";
+
+  if (goOnlineButton) {
+  goOnlineButton.textContent = "🔎 Find a player";
+  delete goOnlineButton.dataset.action;
+  goOnlineButton.classList.remove("play-again");
+}
 
     currentBlackName = blackName || currentBlackName;
     currentWhiteName = whiteName || currentWhiteName;
@@ -1492,6 +2847,7 @@ function initSocket() {
     renderMatchScore();
 
     grid.fill(null);
+    localMoveHistory.length = 0;
     lastMoveIndex = null;
     winnerAlreadyCounted = false;
     winningLine = [];
@@ -1503,12 +2859,126 @@ function initSocket() {
 
     status.textContent = message || "🎉 Match finished!";
     resetButton.textContent = "Play Again";
+    resetButton.style.display = "inline-block";
     resetButton.style.background = "#28a745";
   });
 }
 
+function undoLastLocalMove(numberOfMoves = 1) {
+  if (modeSelect.value === "tournament") {
+    return;
+  }
+
+  if (!localUndoAvailable) {
+  return;
+}
+
+  if (localMoveHistory.length === 0) {
+    return;
+  }
+
+  gameOver = false;
+  winnerAlreadyCounted = false;
+  winningLine = [];
+
+  let removed = 0;
+
+  while (
+    localMoveHistory.length > 0 &&
+    removed < numberOfMoves
+  ) {
+    const index = localMoveHistory.pop();
+
+    if (
+      typeof index !== "number" ||
+      index < 0 ||
+      index >= grid.length
+    ) {
+      continue;
+    }
+
+    grid[index] = null;
+
+    const cell = cells[index];
+
+    if (cell) {
+      cell.classList.remove(
+        "black",
+        "white",
+        "winner",
+        "last-move",
+        "placing"
+      );
+    }
+
+    removed++;
+  }
+  localUndoAvailable = false;
+
+  lastMoveIndex =
+    localMoveHistory.length > 0
+      ? localMoveHistory[
+          localMoveHistory.length - 1
+        ]
+      : null;
+
+  document
+    .querySelectorAll(".cell.last-move")
+    .forEach((cell) => {
+      cell.classList.remove("last-move");
+    });
+
+  if (
+    lastMoveIndex !== null &&
+    cells[lastMoveIndex]
+  ) {
+    cells[lastMoveIndex].classList.add(
+      "last-move"
+    );
+  }
+
+  const stonesPlayed =
+    localMoveHistory.length;
+
+  currentPlayer =
+    stonesPlayed % 2 === 0
+      ? "black"
+      : "white";
+
+  document.body.classList.toggle(
+    "white-turn",
+    currentPlayer === "white"
+  );
+
+  unlockBoard();
+
+  if (modeSelect.value === "ai") {
+    status.textContent =
+      currentPlayer === HUMAN_PLAYER
+        ? "Your turn"
+        : "AI turn";
+  } else {
+    status.textContent =
+      currentPlayer === "black"
+        ? `Turn : ${currentBlackName}`
+        : `Turn : ${currentWhiteName}`;
+  }
+}
+
 // ----------------- RESET -----------------
 function resetGame() {
+
+  stopTournamentCountdown(true);
+
+if (tournamentTurnTimerValue) {
+  tournamentTurnTimerValue.textContent =
+    "02:00";
+}
+if (modeSelect.value !== "tournament") {
+  isTournamentMatchActive = false;
+}
+
+updateModeSpecificUI();
   resetButton.textContent = "Restart";
   resetButton.style.background = "";
 
@@ -1549,6 +3019,10 @@ function resetGame() {
 }
 
   grid.fill(null);
+  
+  localMoveHistory.length = 0;
+localUndoAvailable = false;
+
   lastMoveIndex = null;
   winnerAlreadyCounted = false;
   gameOver = false;
@@ -1584,15 +3058,98 @@ function resetGame() {
 }
 
 // ----------------- BUTTONS -----------------
+if (undoLastMoveBtn) {
+  undoLastMoveBtn.addEventListener("click", () => {
+    const mode = modeSelect.value;
+
+    // Aucun Undo en tournoi
+    if (mode === "tournament") {
+      return;
+    }
+
+    // =========================
+    // ONLINE MULTIPLAYER
+    // =========================
+    if (mode === "online") {
+      if (!socket || !socket.connected) {
+        return;
+      }
+
+      socket.emit("undoOnlineMove");
+      return;
+    }
+
+    // =========================
+    // TWO PLAYERS
+    // =========================
+    if (mode === "pvp") {
+      undoLastLocalMove(1);
+      return;
+    }
+
+    // =========================
+    // AI
+    // =========================
+    if (mode === "ai") {
+      undoLastLocalMove(2);
+    }
+  });
+}
 resetButton.addEventListener("click", resetGame);
 modeSelect.addEventListener("change", () => {
+  updateChatMode();
+  forceHomeToolsDisplay();
+hideTournamentTrophy();
+  const selectedMode = modeSelect.value;
+
+  stopTournamentCountdown(true);
+
+  if (tournamentTurnTimerValue) {
+    tournamentTurnTimerValue.textContent = "02:00";
+  }
+
+  /*
+   * Lorsque nous quittons le mode tournoi,
+   * supprimer toutes les anciennes données du tournoi.
+   */
+  if (selectedMode !== "tournament") {
+    isTournamentMatchActive = false;
+
+    matchScore = {
+      black: 0,
+      white: 0
+    };
+
+    currentBlackName = "Black";
+    currentWhiteName = "White";
+
+    myColor = null;
+    winnerAlreadyCounted = false;
+
+    renderMatchScore();
+  }
+
   resetGame();
+  updateModeSpecificUI();
+
+  if (
+  modeSelect.value === "online" ||
+  modeSelect.value === "tournament"
+) {
+  myColor = null;
+  isTournamentMatchActive = false;
+  lockBoard();
+} else {
+  unlockBoard();
+}
 
   if (onlineInfo) {
-    if (modeSelect.value === "online") {
-      onlineInfo.textContent = 'Enter your name and click "Find a player" to appear online.';
+    if (selectedMode === "online") {
+      onlineInfo.textContent =
+        'Enter your name and click "Find a player" to appear online.';
     } else {
-      onlineInfo.textContent = 'Select "Online Multiplayer" mode to find players.';
+      onlineInfo.textContent =
+        'Select "Online Multiplayer" mode to find players.';
     }
   }
 });
@@ -1658,6 +3215,22 @@ if (declineInviteButton) {
 
 if (goOnlineButton) {
   goOnlineButton.addEventListener("click", () => {
+
+    if (
+  modeSelect.value === "online" &&
+  goOnlineButton.dataset.action === "playAgain"
+) {
+  if (!socket || !socket.connected) {
+    alert("Socket not connected.");
+    return;
+  }
+
+  socket.emit("resetOnlineGame");
+  return;
+}
+
+    console.log("✅ FIND A PLAYER CLICKED");
+
     const mode = modeSelect.value;
     const name = playerNameInput ? playerNameInput.value.trim() : "";
 
@@ -1700,7 +3273,19 @@ document.addEventListener("DOMContentLoaded", () => {
   initSocket();
   initOnlineUI();
   initCollapsiblePanels();
+
+  initTournamentControls();
+forceHomeToolsDisplay();
+
+  hideTournamentTrophy();
   resetGame();
+  updateModeSpecificUI();
+  if (
+  modeSelect.value === "online" ||
+  modeSelect.value === "tournament"
+) {
+  lockBoard();
+}
 
   if (chatContent) {
     chatContent.style.display = "none";
@@ -1712,6 +3297,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 document.addEventListener("DOMContentLoaded", () => {
+  updateChatMode();
   document.getElementById("chatHeader")?.addEventListener("click", () => {
     unreadCount = 0;
 
@@ -1920,58 +3506,579 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-function forceHomeToolsDisplay() {
-  const modeSelect = document.getElementById("mode");
-  if (!modeSelect) return;
+// ===============================
+// TOURNAMENT BASIC ACTIONS
+// ===============================
 
-  const mode = modeSelect.value;
+let createTournamentBtn;
+let joinTournamentBtn;
+let tournamentPlayerNameInput;
+let tournamentNameInput;
+let tournamentCodeInput;
+let tournamentInfo;
+let tournamentPlayers;
+let startTournamentBtn;
 
-  const aiTools = document.querySelectorAll(".ai-tool");
-  const onlineTools = document.querySelectorAll(".online-tool");
-  const pvpTools = document.querySelectorAll(".pvp-tool");
+function initTournamentControls() {
+  createTournamentBtn =
+    document.getElementById("createTournamentBtn");
 
-  aiTools.forEach(el => el.style.display = "none");
-  onlineTools.forEach(el => el.style.display = "none");
-  pvpTools.forEach(el => el.style.display = "none");
+  joinTournamentBtn =
+    document.getElementById("joinTournamentBtn");
 
-  if (mode === "ai") {
-    aiTools.forEach(el => el.style.display = "");
-    pvpTools.forEach(el => el.style.display = "");
+  tournamentPlayerNameInput =
+    document.getElementById("tournamentPlayerName");
+
+  tournamentNameInput =
+    document.getElementById("tournamentName");
+
+  tournamentCodeInput =
+    document.getElementById("tournamentCode");
+
+  tournamentInfo =
+    document.getElementById("tournamentInfo");
+
+  tournamentPlayers =
+    document.getElementById("tournamentPlayers");
+
+  startTournamentBtn =
+    document.getElementById("startTournamentBtn");
+
+  console.log("Tournament buttons:", {
+    createTournamentBtn,
+    joinTournamentBtn,
+    startTournamentBtn
+  });
+
+  if (createTournamentBtn) {
+    createTournamentBtn.addEventListener("click", () => {
+      console.log("✅ CREATE TOURNAMENT CLICKED");
+
+      const playerName =
+        tournamentPlayerNameInput?.value.trim() ||
+        document.getElementById("playerName")?.value.trim();
+
+      const name =
+        tournamentNameInput?.value.trim();
+
+      const code =
+        tournamentCodeInput?.value
+          .trim()
+          .toUpperCase();
+
+      if (!playerName) {
+        alert("Please enter your player name.");
+        return;
+      }
+
+      if (!name) {
+        alert("Please enter a tournament name.");
+        return;
+      }
+
+      if (!code) {
+        alert("Please enter a tournament code.");
+        return;
+      }
+
+      if (!socket || !socket.connected) {
+        alert("Socket not connected.");
+        console.log("Socket:", socket);
+        return;
+      }
+
+      console.log(
+        "📤 Sending createTournament:",
+        {
+          name,
+          code,
+          playerName
+        }
+      );
+
+      socket.emit(
+        "createTournament",
+        {
+          name,
+          code,
+          playerName
+        }
+      );
+    });
   }
 
-  if (mode === "online") {
-    onlineTools.forEach(el => el.style.display = "");
+  if (joinTournamentBtn) {
+    joinTournamentBtn.addEventListener("click", () => {
+      console.log("✅ JOIN TOURNAMENT CLICKED");
+
+      const playerName =
+        tournamentPlayerNameInput?.value.trim() ||
+        document.getElementById("playerName")?.value.trim();
+
+      const code =
+        tournamentCodeInput?.value
+          .trim()
+          .toUpperCase();
+
+      if (!playerName) {
+        alert("Please enter your player name.");
+        return;
+      }
+
+      if (!code) {
+        alert("Please enter a tournament code.");
+        return;
+      }
+
+      if (!socket || !socket.connected) {
+        alert("Socket not connected.");
+        console.log("Socket:", socket);
+        return;
+      }
+
+      console.log(
+        "📤 Sending joinTournament:",
+        {
+          code,
+          playerName
+        }
+      );
+
+      socket.emit(
+        "joinTournament",
+        {
+          code,
+          playerName
+        }
+      );
+    });
   }
 
-  if (mode === "pvp") {
-    pvpTools.forEach(el => el.style.display = "");
-  }
+  if (startTournamentBtn) {
+    startTournamentBtn.addEventListener("click", () => {
+      console.log("✅ START TOURNAMENT CLICKED");
 
-  const inviteBox = document.getElementById("inviteBox");
+      const playerName =
+        tournamentPlayerNameInput?.value.trim() ||
+        document.getElementById("playerName")?.value.trim();
 
-  if (inviteBox && mode !== "online") {
-    inviteBox.style.display = "none";
-  }
+      const code =
+        tournamentCodeInput?.value
+          .trim()
+          .toUpperCase();
 
-  const chat = document.getElementById("chatContainer");
+      if (!playerName) {
+        alert("Please enter the organizer name.");
+        return;
+      }
 
-  if (chat) {
-    chat.style.display = mode === "online" ? "block" : "none";
-  }
+      if (!code) {
+        alert("Please enter the tournament code.");
+        return;
+      }
 
-  const onlinePanel = document.querySelector(".online-panel");
+      if (!socket || !socket.connected) {
+        alert("Socket not connected.");
+        return;
+      }
 
-  if (onlinePanel) {
-    onlinePanel.style.display = mode === "online" ? "" : "none";
+      socket.emit(
+        "startTournament",
+        {
+          code,
+          playerName
+        }
+      );
+    });
   }
 }
 
-window.addEventListener("load", () => {
-  const modeSelect = document.getElementById("mode");
+function renderTournamentPlayers(tournament) {
+  const tournamentPlayersList = document.getElementById("tournamentPlayersList");
 
-  forceHomeToolsDisplay();
+  if (!tournamentPlayersList || !tournament || !Array.isArray(tournament.players)) return;
 
-  if (modeSelect) {
-    modeSelect.addEventListener("change", forceHomeToolsDisplay);
+  tournamentPlayersList.innerHTML = `
+    Players: ${tournament.players.length}/10<br>
+    ${tournament.players.map((name, index) =>
+      `${index + 1}. ${name}${name === (tournament.organizer || tournament.creator) ? " 👑" : ""}`
+    ).join("<br>")}
+  `;
+}
+
+function renderTournamentStandings(
+  standings = []
+) {
+  if (!tournamentStandingsContent) {
+    return;
   }
+
+  if (!standings.length) {
+    tournamentStandingsContent.innerHTML =
+      "No standings yet.";
+    return;
+  }
+
+  tournamentStandingsContent.innerHTML =
+    standings
+      .map(
+        (player, index) => `
+          <div class="tournament-standing-row">
+            <strong>
+              ${index + 1}. ${player.name}
+            </strong>
+            — ${player.points} pts
+            — ${player.seriesWins} wins
+            — ${player.seriesLosses} losses
+            — Games:
+            ${player.gamesWon}-${player.gamesLost}
+          </div>
+        `
+      )
+      .join("");
+}
+
+function renderTournamentMatches(tournament) {
+  if (
+    !tournamentMatchesSection ||
+    !tournamentMatchesContent ||
+    !tournamentMatchesToggle ||
+    !tournamentMatchesList ||
+    !tournament ||
+    !Array.isArray(tournament.matches)
+  ) {
+    return;
+  }
+
+  tournamentMatchesSection.style.display = "block";
+  tournamentMatchesContent.style.display = "block";
+  tournamentMatchesToggle.textContent = "▼";
+
+  const currentPlayerName =
+    tournamentPlayerNameInput?.value.trim() || "";
+
+  const organizerName =
+    tournament.organizer ||
+    tournament.creator ||
+    "";
+
+  const isOrganizer =
+    currentPlayerName === organizerName;
+
+  tournamentMatchesList.innerHTML = tournament.matches
+    .map((match, index) => {
+      const seriesFinished =
+        match.status === "finished" ||
+        Boolean(match.winner);
+
+      const waitingPlayer =
+        match.waitingPlayer || null;
+
+      const isCurrentPlayerWaiting =
+        waitingPlayer === currentPlayerName;
+
+      const opponentIsWaiting =
+        Boolean(waitingPlayer) &&
+        waitingPlayer !== currentPlayerName &&
+        (
+          currentPlayerName === match.player1 ||
+          currentPlayerName === match.player2
+        );
+
+      const isPlayerInMatch =
+        currentPlayerName === match.player1 ||
+        currentPlayerName === match.player2;
+
+      const canPlay =
+        !isOrganizer &&
+        !seriesFinished &&
+        isPlayerInMatch;
+
+      /*
+       * L’organisateur peut regarder seulement
+       * lorsque la partie est réellement active.
+       */
+      const canOrganizerWatch =
+        isOrganizer &&
+        !seriesFinished &&
+        match.status === "playing" &&
+        Boolean(match.liveMatchId);
+
+      const organizerAlreadyWatching =
+        canOrganizerWatch &&
+        isWatching &&
+        watchingMatchId === match.liveMatchId;
+
+      return `
+        <div
+          class="tournament-match"
+          style="margin:10px 0;"
+        >
+          <strong>
+            Match ${index + 1}:
+          </strong>
+
+          ${match.player1}
+          vs
+          ${match.player2}
+
+          <br>
+
+          <small>
+            Best of ${match.maxGames || 7} —
+            first to ${match.winsRequired || 4} victories
+          </small>
+
+          <br>
+
+          ${
+            seriesFinished
+              ? `
+                <div class="tournament-series-finished">
+                  ✅ Series finished<br>
+                  🏆 Winner: ${match.winner}<br>
+                  Final score:
+                  ${match.player1}
+                  ${match.player1Wins || 0}
+                  -
+                  ${match.player2Wins || 0}
+                  ${match.player2}
+                </div>
+              `
+
+              : canOrganizerWatch
+                ? `
+                  <button
+                    type="button"
+                    class="watchTournamentMatchBtn"
+                    data-match-id="${match.id}"
+                    data-live-match-id="${match.liveMatchId}"
+                    ${organizerAlreadyWatching ? "disabled" : ""}
+                  >
+                    ${
+                      organizerAlreadyWatching
+                        ? "👑 Watching Match"
+                        : "👀 Watch Match"
+                    }
+                  </button>
+                `
+
+              : isOrganizer
+                ? `
+                  <span style="font-size:13px;">
+                    ⏳ Waiting for both players to start
+                  </span>
+                `
+
+              : isCurrentPlayerWaiting
+                ? `
+                  <button
+                    type="button"
+                    class="playTournamentMatchBtn"
+                    data-match-id="${match.id}"
+                    disabled
+                  >
+                    ⏳ Waiting for opponent
+                  </button>
+                `
+
+              : opponentIsWaiting
+                ? `
+                  <button
+                    type="button"
+                    class="playTournamentMatchBtn"
+                    data-match-id="${match.id}"
+                    data-player1="${match.player1}"
+                    data-player2="${match.player2}"
+                  >
+                    ▶️ Join ${waitingPlayer}
+                  </button>
+                `
+
+              : canPlay
+                ? `
+                  <button
+                    type="button"
+                    class="playTournamentMatchBtn"
+                    data-match-id="${match.id}"
+                    data-player1="${match.player1}"
+                    data-player2="${match.player2}"
+                  >
+                    ▶️ Play
+                  </button>
+                `
+
+              : `
+                <span style="font-size:13px;">
+                  Waiting for players
+                </span>
+              `
+          }
+        </div>
+      `;
+    })
+    .join("");
+
+  /*
+   * Boutons Play et Join pour les joueurs.
+   */
+  document
+    .querySelectorAll(
+      ".playTournamentMatchBtn"
+    )
+    .forEach((button) => {
+      button.addEventListener(
+        "click",
+        () => {
+          const matchId =
+            button.dataset.matchId;
+
+          if (!socket) {
+            alert(
+              "Socket not connected."
+            );
+            return;
+          }
+
+          const tournamentCode =
+            tournamentCodeInput?.value
+              .trim()
+              .toUpperCase() ||
+            tournament.code;
+
+          const playerName =
+            tournamentPlayerNameInput?.value
+              .trim() || "";
+
+          if (!playerName) {
+            alert(
+              "Please enter your player name."
+            );
+            return;
+          }
+
+          button.disabled = true;
+          button.textContent =
+            "Joining match...";
+
+          lockBoard();
+
+          socket.emit(
+            "joinTournamentMatch",
+            {
+              tournamentCode,
+              matchId,
+              playerName
+            }
+          );
+        }
+      );
+    });
+
+  /*
+   * Boutons Watch réservés à l’organisateur.
+   */
+  document
+    .querySelectorAll(
+      ".watchTournamentMatchBtn"
+    )
+    .forEach((button) => {
+      button.addEventListener(
+        "click",
+        () => {
+          if (!socket) {
+            alert(
+              "Socket not connected."
+            );
+            return;
+          }
+
+          const tournamentMatchId =
+            button.dataset.matchId;
+
+          const tournamentCode =
+            tournamentCodeInput?.value
+              .trim()
+              .toUpperCase() ||
+            tournament.code;
+
+          if (!tournamentCode) {
+            alert(
+              "Tournament code not found."
+            );
+            return;
+          }
+
+          if (!tournamentMatchId) {
+            alert(
+              "Tournament match not found."
+            );
+            return;
+          }
+
+          button.disabled = true;
+          button.textContent =
+            "Loading match...";
+
+          /*
+           * L’organisateur reste spectateur :
+           * aucune couleur et grille verrouillée.
+           */
+          myColor = null;
+          isWatching = true;
+          isTournamentMatchActive = true;
+
+          lockBoard();
+
+          if (status) {
+            status.textContent =
+              "👑 Organizer is joining the match as referee...";
+          }
+
+          socket.emit(
+            "watchTournamentMatch",
+            {
+              tournamentCode,
+              tournamentMatchId
+            }
+          );
+        }
+      );
+    });
+}
+
+function makeTournamentCode(name) {
+  const cleanName = name.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 6);
+  return (cleanName || "CUP") + Math.floor(1000 + Math.random() * 9000);
+}
+
+
+const playersHeader = document.getElementById("playersHeader");
+const playersContent = document.getElementById("playersContent");
+const playersToggle = document.getElementById("playersToggle");
+
+const tournamentStandingsContent =
+  document.getElementById(
+    "tournamentStandingsContent"
+  );
+
+playersHeader?.addEventListener("click", () => {
+  if (playersContent.style.display === "none") {
+    playersContent.style.display = "block";
+    playersToggle.textContent = "▼";
+  } else {
+    playersContent.style.display = "none";
+    playersToggle.textContent = "▶️";
+  }
+});
+
+tournamentMatchesHeader?.addEventListener("click", () => {
+  const isClosed =
+    tournamentMatchesContent.style.display === "none";
+
+  tournamentMatchesContent.style.display =
+    isClosed ? "block" : "none";
+
+  tournamentMatchesToggle.textContent =
+    isClosed ? "▼" : "▶️";
 });
