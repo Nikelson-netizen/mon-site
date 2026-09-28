@@ -1846,6 +1846,35 @@ function initSocket() {
 
   socket = io();
 
+  socket.on("connect", () => {
+  const onlineSessionActive =
+    localStorage.getItem("onlineSessionActive") === "true";
+
+  const playerId =
+    localStorage.getItem("onlinePlayerId");
+
+  const name =
+    localStorage.getItem("onlinePlayerName");
+
+  if (
+    onlineSessionActive &&
+    playerId &&
+    name
+  ) {
+    socket.emit("registerOnlinePlayer", {
+      playerId,
+      name
+    });
+
+    isOnlineRegistered = true;
+
+    console.log(
+      "✅ Online player automatically reconnected:",
+      name
+    );
+  }
+});
+
   socket.on("tournamentCreated", ({ tournament }) => {
   tournamentInfo.innerHTML = `
 🏆 ${tournament.name}<br>
@@ -3249,6 +3278,22 @@ if (declineInviteButton) {
   });
 }
 
+function getOnlinePlayerId() {
+  let id = localStorage.getItem("onlinePlayerId");
+
+  if (!id) {
+    id =
+      "online_" +
+      Date.now() +
+      "_" +
+      Math.random().toString(36).slice(2, 10);
+
+    localStorage.setItem("onlinePlayerId", id);
+  }
+
+  return id;
+}
+
 if (goOnlineButton) {
   goOnlineButton.addEventListener("click", () => {
 
@@ -3289,7 +3334,13 @@ if (goOnlineButton) {
     myColor = null;
 
     if (!isOnlineRegistered) {
-      socket.emit("registerOnlinePlayer", { name });
+      localStorage.setItem("onlineSessionActive", "true");
+localStorage.setItem("onlinePlayerName", name);
+
+      socket.emit("registerOnlinePlayer", {
+  playerId: getOnlinePlayerId(),
+  name
+});
       isOnlineRegistered = true;
     }
 
