@@ -50,14 +50,14 @@ function getChallengePlayerId() {
   return id;
 }
 
+function getChallengeSocket() {
+  return typeof socket !== "undefined" ? socket : null;
+}
+
 function getExistingOnlinePlayerId() {
   return String(
     localStorage.getItem("onlinePlayerId") || ""
   ).trim();
-}
-
-function getChallengeSocket() {
-  return typeof socket !== "undefined" ? socket : null;
 }
 
 const defaultChallengeData = {
@@ -649,18 +649,57 @@ function syncPointsToServer(level = getCurrentChallengeLevel()) {
   const cleanLevel = normalizeLevel(level);
   const stats = getStatsForLevel(cleanLevel);
 
-  if (
-    challengeSocket &&
-    challengeData.playerName &&
-    challengeData.playerName.trim() &&
-    challengeData.playerName !== "Player"
-  ) {
-    challengeSocket.emit("updateChallengePoints", {
-  playerId: getChallengePlayerId(),
-  name: challengeData.playerName,
-  points: stats.points || 0,
-  level: cleanLevel
-});
+  const playerId = getChallengePlayerId();
+  const playerName = String(challengeData.playerName || "").trim();
+
+  if (!playerName || playerName === "Player") return;
+
+  // ✅ Met à jour immédiatement le leaderboard local
+  const board = Array.isArray(challengeData.leaderboards[cleanLevel])
+    ? [...challengeData.leaderboards[cleanLevel]]
+    : [];
+
+  const existingIndex = board.findIndex((player) => {
+    if (!player) return false;
+
+    if (player.playerId && player.playerId === playerId) {
+      return true;
+    }
+
+    return (
+      player.name &&
+      player.name.toLowerCase() === playerName.toLowerCase()
+    );
+  });
+
+  const updatedPlayer = {
+    playerId,
+    name: playerName,
+    points: stats.points || 0,
+    online: true,
+    level: cleanLevel
+  };
+
+  if (existingIndex >= 0) {
+    board[existingIndex] = {
+      ...board[existingIndex],
+      ...updatedPlayer
+    };
+  } else {
+    board.push(updatedPlayer);
+  }
+
+  challengeData.leaderboards[cleanLevel] = board;
+
+  saveChallengeData();
+
+  if (getSelectedLeaderboardLevel() === cleanLevel) {
+    renderLeaderboard();
+  }
+
+  // ✅ Ensuite synchronisation avec le serveur
+  if (challengeSocket) {
+    challengeSocket.emit("updateChallengePoints", updatedPlayer);
   }
 }
 
@@ -914,7 +953,7 @@ function bindChallengePageControls() {
     if (challengeSocket && name && name !== "Player") {
       challengeSocket.emit("registerChallengePlayer", {
   playerId: getChallengePlayerId(),
-  name: typedName,
+  name: name,
   level: getCurrentChallengeLevel()
 });
     }
@@ -977,7 +1016,7 @@ function bindChallengePageControls() {
       if (challengeSocket && name && name !== "Player") {
         challengeSocket.emit("registerChallengePlayer", {
   playerId: getChallengePlayerId(),
-  name: typedName,
+  name: name,
   level: getCurrentChallengeLevel()
 });
       }
@@ -1296,18 +1335,32 @@ document.addEventListener("DOMContentLoaded", async () => {
   const level = getCurrentChallengeLevel();
   const challengeSocket = getChallengeSocket();
 
-  const onlinePlayerId = getExistingOnlinePlayerId();
+  const onlineSessionActive =
+  localStorage.getItem("onlineSessionActive") === "true";
+
+const onlinePlayerId =
+  getExistingOnlinePlayerId();
+
+const onlinePlayerName =
+  String(
+    localStorage.getItem("onlinePlayerName") || ""
+  ).trim();
 
 if (
   challengeSocket &&
+  onlineSessionActive &&
   onlinePlayerId &&
-  playerName &&
-  playerName !== "Player"
+  onlinePlayerName
 ) {
   challengeSocket.emit("registerOnlinePlayer", {
     playerId: onlinePlayerId,
-    name: playerName
+    name: onlinePlayerName
   });
+
+  console.log(
+    "✅ Online session preserved in Challenge:",
+    onlinePlayerName
+  );
 }
 
   if (challengeSocket && playerName && playerName !== "Player") {
