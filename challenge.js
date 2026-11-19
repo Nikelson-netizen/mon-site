@@ -29,6 +29,7 @@ const pageResetButton = document.getElementById("reset");
 const pageModeSelect = document.getElementById("mode");
 
 const STORAGE_KEY = "gomokuChallengeData";
+const CHALLENGE_RESET_VERSION_KEY = "gomokuChallengeResetVersion";
 const isStandaloneChallengePage =
   !!document.querySelector(".challenge-page");
 
@@ -38,8 +39,8 @@ const isIntegratedChallenge =
 const isChallengePage =
   isStandaloneChallengePage || isIntegratedChallenge;
 
-// ✅ Level 1 supprimé
-const VALID_LEVELS = ["2", "3", "4", "5"];
+// Challenge AI levels
+const VALID_LEVELS = ["1", "2", "3", "4", "5"];
 
 function getChallengePlayerId() {
   let id = localStorage.getItem("challengePlayerId");
@@ -57,6 +58,146 @@ function getChallengePlayerId() {
   return id;
 }
 
+/* =========================
+   GOMOKU GUEST SESSION
+========================= */
+
+async function initializeGomokuGuestSession() {
+  try {
+    const response = await fetch("/api/guest/session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({})
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Guest session error: ${response.status}`
+      );
+    }
+
+    const data = await response.json();
+
+    if (!data.success || !data.guestId) {
+      throw new Error("Invalid guest session");
+    }
+
+    window.gomokuGuestId = data.guestId;
+
+    console.log("✅ Gomoku Guest session active");
+
+    return data.guestId;
+
+  } catch (error) {
+    console.warn(
+      "Guest session unavailable:",
+      error.message
+    );
+
+    return null;
+  }
+}
+
+/* =========================
+   LOAD GUEST CHALLENGE STATS
+========================= */
+
+async function loadGuestChallengeStats() {
+  try {
+    const response = await fetch(
+      "/api/guest/challenge-stats",
+      {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store"
+      }
+    );
+
+    if (!response.ok) {
+      console.warn(
+        "Guest stats unavailable:",
+        response.status
+      );
+      return null;
+    }
+
+    const data = await response.json();
+
+    if (!data.success || !Array.isArray(data.stats)) {
+      return null;
+    }
+
+    console.log(
+      "✅ Guest Challenge stats loaded:",
+      data.stats
+    );
+
+    // Restaurer les statistiques PostgreSQL
+// sans écraser les anciennes données locales.
+
+for (const row of data.stats) {
+  const level = String(row.level);
+
+  if (!VALID_LEVELS.includes(level)) {
+    continue;
+  }
+
+  // Protéger les points locaux non synchronisés
+const hasPendingSave =
+  localStorage.getItem(
+    `gomokuChallengePending_${level}`
+  ) === "1";
+
+if (hasPendingSave) {
+  console.warn(
+    "⏳ Guest Challenge sauvegarde en attente:",
+    level
+  );
+
+  continue;
+}
+
+  challengeData.levelStats[level] = {
+    points: Number(row.points) || 0,
+    wins: Number(row.wins) || 0,
+    losses: Number(row.losses) || 0,
+    streak: Number(row.streak) || 0,
+    bestStreak: Number(row.best_streak) || 0,
+    revision: Number(row.revision) || 0
+  };
+
+  // Mémoriser la dernière version PostgreSQL
+// sans écraser une sauvegarde locale en attente.
+if (
+  localStorage.getItem(
+    `gomokuChallengePending_${level}`
+  ) !== "1"
+) {
+  localStorage.setItem(
+    `gomokuChallengeSynced_${level}`,
+    JSON.stringify(row)
+  );
+}
+}
+
+saveChallengeData();
+renderProfile();
+
+return data.stats;
+
+  } catch (error) {
+    console.error(
+      "Guest Challenge load error:",
+      error.message
+    );
+
+    return null;
+  }
+}
+
 function getExistingOnlinePlayerId() {
   return String(
     localStorage.getItem("onlinePlayerId") || ""
@@ -72,31 +213,33 @@ const defaultChallengeData = {
   playerName: localStorage.getItem("challengePlayerName") || localStorage.getItem("playerName") || "Player",
   online: false,
 
-  selectedLeaderboardLevel: "2",
+  selectedLeaderboardLevel: "1",
 
   // ✅ stats séparées par niveau
   levelStats: {
+    "1": { points: 0, wins: 0, losses: 0, streak: 0, bestStreak: 0 },
     "2": { points: 0, wins: 0, losses: 0, streak: 0, bestStreak: 0 },
     "3": { points: 0, wins: 0, losses: 0, streak: 0, bestStreak: 0 },
     "4": { points: 0, wins: 0, losses: 0, streak: 0, bestStreak: 0 },
     "5": { points: 0, wins: 0, losses: 0, streak: 0, bestStreak: 0 }
-  },
+},
 
   history: [],
 
   leaderboards: {
-    "2": [],
-    "3": [],
-    "4": [],
-    "5": []
-  }
+  "1": [],
+  "2": [],
+  "3": [],
+  "4": [],
+  "5": []
+}
 };
 
 let challengeData = loadChallengeData();
 
 function normalizeLevel(level) {
   const clean = String(level || "").trim();
-  return VALID_LEVELS.includes(clean) ? clean : "2";
+  return VALID_LEVELS.includes(clean) ? clean : "1";
 }
 
 function getCurrentChallengeLevel() {
@@ -104,7 +247,7 @@ function getCurrentChallengeLevel() {
     (pageAiLevelSelect && pageAiLevelSelect.value) ||
       localStorage.getItem("challengeLevel") ||
       challengeData.selectedLeaderboardLevel ||
-      "2"
+      "1"
   );
 }
 
@@ -139,6 +282,7 @@ function ensureLeaderboardsShape(data) {
   return next;
 }
 
+    
 function ensureLevelStatsShape(data) {
   const next = { ...data };
 
@@ -150,12 +294,15 @@ function ensureLevelStatsShape(data) {
   VALID_LEVELS.forEach((level) => {
     const stat = next.levelStats[level] || {};
     next.levelStats[level] = {
-      points: Number.isFinite(stat.points) ? stat.points : 0,
-      wins: Number.isFinite(stat.wins) ? stat.wins : 0,
-      losses: Number.isFinite(stat.losses) ? stat.losses : 0,
-      streak: Number.isFinite(stat.streak) ? stat.streak : 0,
-      bestStreak: Number.isFinite(stat.bestStreak) ? stat.bestStreak : 0
-    };
+  points: Number.isFinite(stat.points) ? stat.points : 0,
+  wins: Number.isFinite(stat.wins) ? stat.wins : 0,
+  losses: Number.isFinite(stat.losses) ? stat.losses : 0,
+  streak: Number.isFinite(stat.streak) ? stat.streak : 0,
+  bestStreak: Number.isFinite(stat.bestStreak) ? stat.bestStreak : 0,
+  revision: Number.isSafeInteger(stat.revision) && stat.revision >= 0
+    ? stat.revision
+    : 0
+};
   });
 
   return next;
@@ -185,7 +332,7 @@ function migrateLegacyData(data) {
     const targetLevel = normalizeLevel(
       localStorage.getItem("challengeLevel") ||
         next.selectedLeaderboardLevel ||
-        "2"
+        "1"
     );
 
     next.levelStats[targetLevel] = {
@@ -221,7 +368,7 @@ function normalizeChallengeData(data) {
 
   next.online = !!next.online;
   next.history = Array.isArray(next.history) ? next.history : [];
-  next.selectedLeaderboardLevel = normalizeLevel(next.selectedLeaderboardLevel || "2");
+  next.selectedLeaderboardLevel = normalizeLevel(next.selectedLeaderboardLevel || "1");
 
   VALID_LEVELS.forEach((level) => {
     next.leaderboards[level] = Array.isArray(next.leaderboards[level])
@@ -253,10 +400,368 @@ function loadChallengeData() {
   }
 }
 
+async function checkGlobalChallengeReset() {
+  try {
+    const response = await fetch("/api/challenge/reset-version", {
+      cache: "no-store"
+    });
+
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const serverVersion = Number(data.version) || 0;
+    const localVersion =
+      Number(localStorage.getItem(CHALLENGE_RESET_VERSION_KEY)) || 0;
+
+    if (serverVersion <= localVersion) return;
+
+    // Effacer toutes les anciennes données Challenge
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem("challengeLevel");
+    localStorage.removeItem("challengeResult");
+    localStorage.removeItem("challengePlayerId");
+    localStorage.removeItem("challengePlayerName");
+    localStorage.removeItem("playerName");
+
+    VALID_LEVELS.forEach((level) => {
+      localStorage.removeItem(`gomokuChallengePending_${level}`);
+      localStorage.removeItem(`gomokuChallengeSynced_${level}`);
+      localStorage.removeItem(`gomokuChallengeConflict_${level}`);
+    });
+
+    // Enregistrer la version pour ne faire le reset qu'une seule fois
+    localStorage.setItem(
+      CHALLENGE_RESET_VERSION_KEY,
+      String(serverVersion)
+    );
+
+    console.log(
+      "✅ Challenge local complètement réinitialisé:",
+      serverVersion
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "❌ Impossible de vérifier le reset Challenge:",
+      error.message
+    );
+
+    return false;
+  }
+}
+
 function saveChallengeData() {
   challengeData = normalizeChallengeData(challengeData);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(challengeData));
 }
+
+const guestChallengeSavingLevels = new Set();
+const guestChallengeSaveAgain = new Set();
+
+function getLastSyncedGuestStats(level) {
+  const cleanLevel = normalizeLevel(level);
+
+  const raw = localStorage.getItem(
+    `gomokuChallengeSynced_${cleanLevel}`
+  );
+
+  if (!raw) return null;
+
+  try {
+    const saved = JSON.parse(raw);
+
+    if (!saved || typeof saved !== "object") {
+      return null;
+    }
+
+    const revision = Number(saved.revision);
+
+    if (
+      !Number.isSafeInteger(revision) ||
+      revision < 0
+    ) {
+      return null;
+    }
+
+    return {
+      points: Number(saved.points) || 0,
+      wins: Number(saved.wins) || 0,
+      losses: Number(saved.losses) || 0,
+      streak: Number(saved.streak) || 0,
+      bestStreak:
+        Number(
+          saved.best_streak ?? saved.bestStreak
+        ) || 0,
+      revision
+    };
+
+  } catch (error) {
+    console.warn(
+      "Unable to read synced Challenge stats:",
+      error.message
+    );
+
+    return null;
+  }
+  
+}
+
+// Calculer les changements depuis
+// la dernière sauvegarde PostgreSQL.
+function getGuestChallengeUnsyncedChanges(level) {
+  const cleanLevel = normalizeLevel(level);
+
+  const syncedStats =
+    getLastSyncedGuestStats(cleanLevel);
+
+  if (!syncedStats) {
+    return null;
+  }
+
+  const localStats =
+    getStatsForLevel(cleanLevel);
+
+  return {
+    level: cleanLevel,
+
+    baseRevision: syncedStats.revision,
+
+    pointsDifference:
+      localStats.points - syncedStats.points,
+
+    winsDifference:
+      localStats.wins - syncedStats.wins,
+
+    lossesDifference:
+      localStats.losses - syncedStats.losses,
+
+    localStreak: localStats.streak,
+
+    localBestStreak: localStats.bestStreak
+  };
+}
+
+function inspectGuestChallengeConflict(level, serverStats) {
+  const cleanLevel = normalizeLevel(level);
+
+  const synced =
+    getLastSyncedGuestStats(cleanLevel);
+
+  const changes =
+    getGuestChallengeUnsyncedChanges(cleanLevel);
+
+  if (!synced || !changes || !serverStats) {
+    return null;
+  }
+
+  const serverWinsDifference =
+    Number(serverStats.wins) - synced.wins;
+
+  const serverLossesDifference =
+    Number(serverStats.losses) - synced.losses;
+
+  const differences = [
+    serverWinsDifference,
+    serverLossesDifference,
+    changes.winsDifference,
+    changes.lossesDifference
+  ];
+
+  if (
+    !differences.every(
+      value => Number.isSafeInteger(value) && value >= 0
+    )
+  ) {
+    return null;
+  }
+
+  const serverGames =
+    serverWinsDifference + serverLossesDifference;
+
+  const localGames =
+    changes.winsDifference + changes.lossesDifference;
+
+  return {
+    level: cleanLevel,
+    serverGames,
+    localGames,
+    concurrentChanges:
+      serverGames > 0 && localGames > 0
+  };
+}
+
+async function saveGuestChallengeStats(level) {
+  const cleanLevel = normalizeLevel(level);
+
+  localStorage.setItem(
+    `gomokuChallengePending_${cleanLevel}`,
+    "1"
+  );
+
+  if (guestChallengeSavingLevels.has(cleanLevel)) {
+    guestChallengeSaveAgain.add(cleanLevel);
+    return;
+  }
+
+  guestChallengeSavingLevels.add(cleanLevel);
+
+  try {
+    const guestReady = window.gomokuGuestSessionReady;
+
+    if (!guestReady) return;
+
+    const guestId = await guestReady;
+
+    if (!guestId) return;
+
+    const stats = getStatsForLevel(cleanLevel);
+
+    const response = await fetch(
+      "/api/guest/challenge-stats",
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          name: getStoredChallengePlayerName(),
+          level: Number(cleanLevel),
+          revision: Number(stats.revision) || 0,
+          points: stats.points,
+          wins: stats.wins,
+          losses: stats.losses,
+          streak: stats.streak,
+          bestStreak: stats.bestStreak
+        })
+      }
+    );
+
+    const result = await response.json();
+
+    if (response.status === 409) {
+  // Garder les statistiques PostgreSQL
+  // pour résoudre le conflit ensuite.
+  if (result.serverStats) {
+    localStorage.setItem(
+      `gomokuChallengeConflict_${cleanLevel}`,
+      JSON.stringify(result.serverStats)
+    );
+  }
+
+  console.warn(
+    "⚠️ Conflit PostgreSQL : statistiques locales conservées.",
+    result.serverStats
+  );
+
+  const conflictInfo =
+  inspectGuestChallengeConflict(
+    cleanLevel,
+    result.serverStats
+  );
+
+if (conflictInfo?.concurrentChanges) {
+  console.warn(
+    "⚠️ Modifications simultanées détectées.",
+    conflictInfo
+  );
+}
+
+  return;
+}
+
+    if (!response.ok || !result.success) {
+      throw new Error(
+        result.message || "Unable to save Guest stats"
+      );
+    }
+
+    // Conserver la dernière version réellement
+// enregistrée dans PostgreSQL.
+if (result.stats) {
+  localStorage.setItem(
+    `gomokuChallengeSynced_${cleanLevel}`,
+    JSON.stringify(result.stats)
+  );
+}
+
+    // Conserver la nouvelle révision PostgreSQL
+const serverRevision = Number(result.stats?.revision);
+
+if (
+  Number.isSafeInteger(serverRevision) &&
+  serverRevision >= 0
+) {
+  const currentStats = getStatsForLevel(cleanLevel);
+
+  currentStats.revision = Math.max(
+    Number(currentStats.revision) || 0,
+    serverRevision
+  );
+
+  saveChallengeData();
+}
+
+// Ne pas effacer l'indicateur si une
+// nouvelle sauvegarde est en attente.
+if (!guestChallengeSaveAgain.has(cleanLevel)) {
+  localStorage.removeItem(
+    `gomokuChallengePending_${cleanLevel}`
+  );
+}
+
+console.log(
+  "✅ Guest Challenge stats saved:",
+  cleanLevel
+);
+
+  } catch (error) {
+
+  // Signaler une sauvegarde non terminée
+  localStorage.setItem(
+    `gomokuChallengePending_${normalizeLevel(level)}`,
+    "1"
+  );
+
+  console.error(
+    "❌ Guest Challenge save error:",
+    error.message
+  );
+} finally {
+    guestChallengeSavingLevels.delete(cleanLevel);
+
+    if (guestChallengeSaveAgain.has(cleanLevel)) {
+      guestChallengeSaveAgain.delete(cleanLevel);
+      saveGuestChallengeStats(cleanLevel);
+    }
+  }
+}
+
+async function retryPendingGuestChallengeSaves() {
+  for (const level of VALID_LEVELS) {
+    const pending = localStorage.getItem(
+      `gomokuChallengePending_${level}`
+    );
+
+    if (pending === "1") {
+      console.log(
+        "🔄 Retry Guest Challenge save:",
+        level
+      );
+
+      await saveGuestChallengeStats(level);
+    }
+  }
+}
+
+// Réessayer les sauvegardes lorsque
+// la connexion Internet revient.
+window.addEventListener("online", async () => {
+  console.log("🌐 Internet connection restored");
+
+  await retryPendingGuestChallengeSaves();
+});
 
 function getStoredChallengePlayerName() {
   const name = localStorage.getItem("challengePlayerName") || challengeData.playerName;
@@ -264,7 +769,7 @@ function getStoredChallengePlayerName() {
 }
 
 function getStoredChallengeAiLevel() {
-  return normalizeLevel(localStorage.getItem("challengeLevel") || "2");
+  return normalizeLevel(localStorage.getItem("challengeLevel") || "1");
 }
 
 function getStoredChallengeFirstPlayer() {
@@ -295,7 +800,8 @@ function getStatsForLevel(level = getCurrentChallengeLevel()) {
       wins: 0,
       losses: 0,
       streak: 0,
-      bestStreak: 0
+      bestStreak: 0,
+      revision: 0
     };
   }
   return challengeData.levelStats[cleanLevel];
@@ -350,13 +856,75 @@ function addHistory(title, details, level = getCurrentChallengeLevel()) {
 }
 
 function getAiBonus(aiLevel) {
-  const levelNum = parseInt(aiLevel, 10) || 2;
+  const levelNum = parseInt(aiLevel, 10) || 1;
 
+  if (levelNum === 1) return 0;
   if (levelNum === 2) return 5;
   if (levelNum === 3) return 10;
   if (levelNum === 4) return 15;
   if (levelNum >= 5) return 20;
   return 0;
+}
+
+const CHALLENGE_WINS_TO_UNLOCK = {
+  "1": 2,
+  "2": 3,
+  "3": 4,
+  "4": 4
+};
+
+function getWinsNeededForNextLevel(level) {
+  const cleanLevel = normalizeLevel(level);
+
+  if (cleanLevel === "5") {
+    return null;
+  }
+
+  return CHALLENGE_WINS_TO_UNLOCK[cleanLevel] || null;
+}
+
+function checkChallengeLevelUp(level) {
+  const cleanLevel = normalizeLevel(level);
+
+  // Niveau 5 = niveau maximum
+  if (cleanLevel === "5") {
+    return {
+      leveledUp: false,
+      maxLevel: true,
+      level: "5"
+    };
+  }
+
+  const stats = getStatsForLevel(cleanLevel);
+  const winsNeeded = getWinsNeededForNextLevel(cleanLevel);
+
+  if (!winsNeeded || stats.wins < winsNeeded) {
+    return {
+      leveledUp: false,
+      maxLevel: false,
+      level: cleanLevel,
+      wins: stats.wins,
+      winsNeeded
+    };
+  }
+
+  const nextLevel = String(Number(cleanLevel) + 1);
+
+  localStorage.setItem("challengeLevel", nextLevel);
+  challengeData.selectedLeaderboardLevel = nextLevel;
+
+  if (pageAiLevelSelect) {
+    pageAiLevelSelect.value = nextLevel;
+  }
+
+  saveChallengeData();
+
+  return {
+    leveledUp: true,
+    maxLevel: nextLevel === "5",
+    previousLevel: cleanLevel,
+    level: nextLevel
+  };
 }
 
 // ✅ on ne reset PAS le joueur au refresh
@@ -395,18 +963,47 @@ function updateLocalLeaderboardName(oldName, newName) {
       return player;
     });
 
-    if (!renamed) {
-      const currentStats = getStatsForLevel(level);
-      updated.push({
-        name: newClean,
-        points: currentStats.points || 0,
-        online: level === getCurrentChallengeLevel() ? true : !!challengeData.online,
-        level
-      });
-    }
-
   challengeData.leaderboards[level] = updated;
   });
+}
+
+function updateCurrentPlayerInLocalLeaderboard(level = getCurrentChallengeLevel()) {
+  const cleanLevel = normalizeLevel(level);
+  const name = String(challengeData.playerName || "").trim();
+
+  if (!name || name === "Player") return;
+
+  const stats = getStatsForLevel(cleanLevel);
+
+  const board = Array.isArray(challengeData.leaderboards[cleanLevel])
+    ? [...challengeData.leaderboards[cleanLevel]]
+    : [];
+
+  const existingIndex = board.findIndex(
+    (player) =>
+      player &&
+      String(player.name || "").trim().toLowerCase() ===
+        name.toLowerCase()
+  );
+
+  const playerData = {
+    playerId: getChallengePlayerId(),
+    name,
+    points: stats.points || 0,
+    online: true,
+    level: cleanLevel
+  };
+
+  if (existingIndex >= 0) {
+    board[existingIndex] = {
+      ...board[existingIndex],
+      ...playerData
+    };
+  } else {
+    board.push(playerData);
+  }
+
+  challengeData.leaderboards[cleanLevel] = board;
 }
 
 function renderProfile() {
@@ -475,22 +1072,28 @@ function ensureLeaderboardTabs() {
 function renderLeaderboard() {
   if (!leaderboardList) return;
 
-  ensureLeaderboardTabs();
   leaderboardList.innerHTML = "";
 
-  const selectedLevel = getSelectedLeaderboardLevel();
-  const levelBoard = Array.isArray(challengeData.leaderboards[selectedLevel])
-    ? challengeData.leaderboards[selectedLevel]
+  const levelBoard = VALID_LEVELS.flatMap((level) => {
+  const players = Array.isArray(challengeData.leaderboards[level])
+    ? challengeData.leaderboards[level]
     : [];
 
-  const sorted = [...levelBoard]
+  return players.map((player) => ({
+    ...player,
+    level: String(level)
+  }));
+});
+
+const sorted = [...levelBoard]
     .filter((player) => player && player.name && player.name.trim() && player.name !== "Player")
     .sort((a, b) => b.points - a.points);
 
   if (!sorted.length) {
-    leaderboardList.innerHTML = `<div class="empty-text">No players yet in Level ${selectedLevel}</div>`;
-    return;
-  }
+  leaderboardList.innerHTML =
+    `<div class="empty-text">No players yet in the Global Leaderboard</div>`;
+  return;
+}
 
   sorted.forEach((player, index) => {
     const item = document.createElement("div");
@@ -503,7 +1106,7 @@ function renderLeaderboard() {
           <div class="lb-name">${player.name}</div>
           <div class="lb-sub">
             <span class="dot ${player.online ? "green" : "red"}"></span>
-            ${player.online ? "Online" : "Offline"} • Level ${selectedLevel}
+            ${player.online ? "Online" : "Offline"} • Level ${player.level}
           </div>
         </div>
       </div>
@@ -599,16 +1202,21 @@ async function fetchAllLeaderboardsFromServer() {
     if (!data.success || !data.leaderboards) return;
 
     VALID_LEVELS.forEach((level) => {
-      challengeData.leaderboards[level] = Array.isArray(data.leaderboards[level])
-  ? data.leaderboards[level].map((player) => ({
+
+  const serverBoard = Array.isArray(data.leaderboards[level])
+  ? data.leaderboards[level]
+  : [];
+
+  challengeData.leaderboards[level] =
+    serverBoard.map((player) => ({
       playerId: player.playerId,
       name: player.name,
       points: player.points,
       online: !!player.online,
       level
-    }))
-  : [];
-    });
+    }));
+
+});
 
     saveChallengeData();
     renderLeaderboard();
@@ -727,8 +1335,13 @@ function applyLastChallengeResult() {
     }
 
     localStorage.removeItem("challengeResult");
-    saveChallengeData();
-    syncPointsToServer(resultLevel);
+saveChallengeData();
+
+// Sauvegarder les nouveaux points dans PostgreSQL
+saveGuestChallengeStats(resultLevel);
+
+syncCurrentPlayerToServer();
+syncPointsToServer(resultLevel);
   } catch (err) {
     console.error("Error reading challengeResult:", err);
     localStorage.removeItem("challengeResult");
@@ -750,9 +1363,34 @@ function handleWin({ aiStarted = false, onlineGame = false, fastWin = false, aiL
   stats.wins += 1;
   stats.streak += 1;
 
+  const levelProgress = checkChallengeLevelUp(level);
+
   if (stats.streak > stats.bestStreak) {
     stats.bestStreak = stats.streak;
   }
+
+  if (levelProgress.leveledUp) {
+  setTimeout(() => {
+    alert(
+      `🏆 Félicitations ! Niveau ${levelProgress.level} débloqué ! 🚀\nL'IA devient plus difficile.`
+    );
+  }, 300);
+} else if (levelProgress.maxLevel) {
+  setTimeout(() => {
+    alert(
+      `👑 Victoire au niveau 5 ! +${gain} points 🔥\nContinue pour monter dans le classement général.`
+    );
+  }, 300);
+} else {
+  const remaining =
+    levelProgress.winsNeeded - levelProgress.wins;
+
+  setTimeout(() => {
+    alert(
+      `🎉 Victoire ! ${levelProgress.wins}/${levelProgress.winsNeeded} victoires — encore ${remaining} pour débloquer le niveau ${Number(level) + 1} 🔥🤖`
+    );
+  }, 300);
+}
 
   addHistory(
     "✅ Victory",
@@ -760,8 +1398,17 @@ function handleWin({ aiStarted = false, onlineGame = false, fastWin = false, aiL
     level
   );
 
+  updateLocalLeaderboardName(
+  challengeData.playerName,
+  challengeData.playerName
+);
+
+updateCurrentPlayerInLocalLeaderboard(level);
+
   renderAll();
+  syncCurrentPlayerToServer();
   syncPointsToServer(level);
+  saveGuestChallengeStats(level);
 }
 
 function handleLoss({ onlineGame = false, aiLevel = null } = {}) {
@@ -785,8 +1432,11 @@ function handleLoss({ onlineGame = false, aiLevel = null } = {}) {
     level
   );
 
+  updateCurrentPlayerInLocalLeaderboard(level);
+
   renderAll();
   syncPointsToServer(level);
+  saveGuestChallengeStats(level);
 }
 
 function startChallenge() {
@@ -809,10 +1459,13 @@ function startChallenge() {
 
   updateLocalLeaderboardName(oldName, typedName);
 
-  localStorage.setItem(
-    "challengeLevel",
-    pageAiLevelSelect ? pageAiLevelSelect.value : getStoredChallengeAiLevel()
-  );
+  const unlockedLevel = getStoredChallengeAiLevel();
+
+localStorage.setItem("challengeLevel", unlockedLevel);
+
+if (pageAiLevelSelect) {
+  pageAiLevelSelect.value = unlockedLevel;
+}
   localStorage.setItem(
     "challengeFirstPlayer",
     pageFirstPlayerSelect ? pageFirstPlayerSelect.value : getStoredChallengeFirstPlayer()
@@ -847,23 +1500,30 @@ function patchChallengeGameSync() {
   const originalShowWinner = window.showWinner;
 
   window.showWinner = function patchedShowWinner(winnerName) {
+    console.log("🏆 CHALLENGE TEST", {
+  winnerName,
+  mode: pageModeSelect?.value,
+  humanName: window.currentBlackName,
+  whiteName: window.currentWhiteName
+});
     const alreadyApplied = !!window.__challengeRoundApplied;
 
     const currentAiLevel = pageAiLevelSelect ? pageAiLevelSelect.value : getStoredChallengeAiLevel();
     const aiStarted =
       (pageFirstPlayerSelect ? pageFirstPlayerSelect.value : getStoredChallengeFirstPlayer()) === "ai";
 
-    const humanName =
-      typeof window.currentBlackName === "string" && window.currentBlackName.trim()
-        ? window.currentBlackName.trim()
-        : getStoredChallengePlayerName();
+    const humanName = (
+  pagePlayerNameInput?.value.trim() ||
+  getStoredChallengePlayerName()
+).trim()
 
     const whiteName =
       typeof window.currentWhiteName === "string" && window.currentWhiteName.trim()
         ? window.currentWhiteName.trim()
         : "White";
 
-    const isAiPageGame = pageModeSelect && pageModeSelect.value === "ai";
+    const isAiPageGame =
+  pageModeSelect && pageModeSelect.value === "challenge";
 
     if (!alreadyApplied && isAiPageGame) {
       if (winnerName === humanName) {
@@ -960,12 +1620,9 @@ function bindChallengePageControls() {
       pageAiLevelSelect.value = storedLevel;
     }
 
-    // ✅ si level 1 existe encore dans le HTML, on le retire visuellement
-    Array.from(pageAiLevelSelect.options).forEach((opt) => {
-      if (opt.value === "1") {
-        opt.remove();
-      }
-    });
+    if (pageAiLevelSelect) {
+  pageAiLevelSelect.disabled = false;
+}
 
     pageAiLevelSelect.addEventListener("change", async () => {
       const cleanLevel = normalizeLevel(pageAiLevelSelect.value);
@@ -1072,8 +1729,11 @@ if (resetChallengeDataBtn) {
     );
 
     saveChallengeData();
-    renderAll();
-    resetRoundSyncFlag();
+renderAll();
+resetRoundSyncFlag();
+
+// Enregistrer également la remise à zéro dans PostgreSQL
+await saveGuestChallengeStats(currentLevel);
 
     try {
       await fetch("/api/challenge/leaderboard/upsert", {
@@ -1102,8 +1762,7 @@ if (shareChallengeBtn) {
     const level = getStoredChallengeAiLevel();
     const first = getStoredChallengeFirstPlayer();
 
-    const shareUrl =
-  'https://gomoku-morpion-5-online.onrender.com/index.html?mode=ai&challenge=1&level=${level}&first=${first}';
+    const shareUrl = '"https://gomoku-morpion-5-online.onrender.com/download.html"/index.html?mode=ai&challenge=1&level=${level}&first=${first}';
 
     const shareText = `🟢 I'm dominating Gomoku right now.
 
@@ -1255,7 +1914,6 @@ window.renderLeaderboardChallenge = renderLeaderboard;
 window.renderHistoryChallenge = renderHistory;
 
 bindChallengePageControls();
-applyLastChallengeResult();
 
 const urlParams = getChallengeParamsFromURL();
 
@@ -1272,7 +1930,6 @@ if (urlParams.first && pageFirstPlayerSelect) {
 
 renderAll();
 
-patchChallengeGameSync();
 resetRoundSyncFlag();
 bindCollapseCards();
 
@@ -1290,9 +1947,56 @@ if (isLocal || isAdmin) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  registerChallengeSocketListeners();
+  patchChallengeGameSync();
+
+  const globalResetApplied = await checkGlobalChallengeReset();
+
+if (globalResetApplied) {
+  challengeData = normalizeChallengeData({
+  ...deepClone(defaultChallengeData),
+  browserPlayerId: getChallengePlayerId(),
+  playerName: "Player",
+  selectedLeaderboardLevel: "1",
+  history: [],
+  levelStats: deepClone(defaultChallengeData.levelStats),
+  leaderboards: deepClone(defaultChallengeData.leaderboards)
+});
+  saveChallengeData();
+
+  if (pagePlayerNameInput) {
+    pagePlayerNameInput.value = "";
+  }
+
+  renderProfile();
+  renderLeaderboard();
+  renderHistory();
+}
+
+  // ✅ Initialiser une seule fois la session Guest
+  window.gomokuGuestSessionReady =
+    initializeGomokuGuestSession();
+
+  await window.gomokuGuestSessionReady;
+
+// Charger les statistiques PostgreSQL seulement
+// si aucun reset global vient d'être appliqué
+if (!globalResetApplied) {
+  await loadGuestChallengeStats();
+}
+
+if (!globalResetApplied) {
+  applyLastChallengeResult();
+} else {
+  localStorage.removeItem("challengeResult");
+}
+
+// Conserver les fonctions Challenge
+registerChallengeSocketListeners();
 
   await fetchAllLeaderboardsFromServer();
+  if (!globalResetApplied) {
+  await retryPendingGuestChallengeSaves();
+}
 
   const playerName = (
     challengeData.playerName ||
@@ -1304,21 +2008,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const level = getCurrentChallengeLevel();
   const challengeSocket = getChallengeSocket();
 
-  const onlinePlayerId = getExistingOnlinePlayerId();
-
-if (
+  if (
+  !globalResetApplied &&
   challengeSocket &&
-  onlinePlayerId &&
   playerName &&
   playerName !== "Player"
 ) {
-  challengeSocket.emit("registerOnlinePlayer", {
-    playerId: onlinePlayerId,
-    name: playerName
-  });
-}
-
-  if (challengeSocket && playerName && playerName !== "Player") {
     challengeSocket.emit("registerChallengePlayer", {
   playerId: getChallengePlayerId(),
   name: playerName,
@@ -1326,7 +2021,9 @@ if (
 });
   }
 
+  if (!globalResetApplied) {
   await syncCurrentPlayerToServer();
+}
 
   renderProfile();
   renderLeaderboard();

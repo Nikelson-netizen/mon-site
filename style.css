@@ -633,7 +633,8 @@ body.watching-mode .container {
   display: none !important;
 }
 
-body.mode-ai .ai-tool {
+body.mode-ai .ai-tool,
+body.mode-challenge .ai-tool {
   display: flex !important;
 }
 
@@ -2009,4 +2010,307 @@ body.mode-tournament #tournamentTurnTimer {
   color: white !important;
   transform: scale(1.05);
   box-shadow: 0 0 14px rgba(229, 57, 53, 0.55);
+}
+
+/* =====================================
+   CHALLENGE - NOUVELLE BARRE COMPACTE
+===================================== */
+
+body.mode-ai #aiChallengePanel {
+  display: block !important;
+}
+
+#aiChallengePanel {
+  width: 100%;
+  max-width: 760px;
+  margin: 10px auto 14px;
+  padding: 0 8px;
+  box-sizing: border-box;
+}
+
+/* Ligne des 5 icônes */
+.challenge-toolbar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.challenge-toolbar-left,
+.challenge-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Petits boutons */
+#aiChallengePanel .challenge-icon-btn {
+  width: 48px !important;
+  height: 48px !important;
+
+  min-width: 48px !important;
+  min-height: 48px !important;
+
+  padding: 0 !important;
+  margin: 0 !important;
+
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+
+  background: rgba(255, 255, 255, 0.94) !important;
+  color: #222 !important;
+
+  border: none !important;
+  border-radius: 14px !important;
+
+  font-size: 23px !important;
+  line-height: 1 !important;
+
+  box-shadow: 0 4px 12px rgba(0,0,0,0.13) !important;
+
+  cursor: pointer;
+}
+
+/* Reset */
+#aiChallengePanel .reset-icon-btn {
+  background: #eeeeee !important;
+}
+
+/* Share */
+#aiChallengePanel .share-icon-btn {
+  background: #22c55e !important;
+  color: white !important;
+}
+
+/* Contenu qui s'ouvre sous les icônes */
+.challenge-mini-content {
+  width: 100%;
+  margin-top: 10px;
+  padding: 14px;
+
+  background: rgba(255,255,255,0.94);
+  border-radius: 16px;
+
+  box-shadow: 0 4px 14px rgba(0,0,0,0.10);
+}
+
+.challenge-mini-content h3 {
+  margin: 0 0 14px;
+  text-align: center;
+}
+
+/* Mobile */
+@media (max-width: 520px) {
+
+  #aiChallengePanel {
+    padding: 0 4px;
+    margin-top: 8px;
+  }
+
+  .challenge-toolbar {
+    gap: 5px;
+  }
+
+  .challenge-toolbar-left,
+  .challenge-toolbar-right {
+    gap: 5px;
+  }
+
+  #aiChallengePanel .challenge-icon-btn {
+    width: 44px !important;
+    height: 44px !important;
+
+    min-width: 44px !important;
+    min-height: 44px !important;
+
+    font-size: 21px !important;
+    border-radius: 12px !important;
+  }
+}
+
+body.mode-challenge:has(#challengeType option[value="ranked"]:checked)
+#aiLevel {
+  display: none !important;
+}
+
+body.mode-challenge:has(#challengeType option[value="ranked"]:checked) #aiLevelGroup {
+  display: none !important;
+}
+
+/* =========================================
+   CHALLENGE : OUTILS SELON LE SOUS-MODE
+========================================= */
+
+/* Cacher les outils du Ranked Challenge
+   dans Play vs AI */
+body.mode-challenge:has(#challengeType option[value="free"]:checked)
+#aiChallengePanel .challenge-toolbar-left {
+  display: none !important;
+}
+
+/* Afficher les outils dans Ranked Challenge */
+body.mode-challenge:has(#challengeType option[value="ranked"]:checked)
+#aiChallengePanel .challenge-toolbar-left {
+  display: flex !important;
+}
+
+/* Masquer le panneau de profil, classement
+   et historique dans Play vs AI */
+body.mode-challenge:has(#challengeType option[value="free"]:checked)
+#aiChallengePanel .challenge-mini-content {
+  display: none !important;
+}
+
+/* =========================================
+   PLAY VS AI - BOUTONS AU DÉMARRAGE
+========================================= */
+
+/* Cacher Share Challenge dans Play vs AI */
+body.mode-challenge:has(#challengeType option[value="free"]:checked)
+#aiChallengePanel .share-icon-btn {
+  display: none !important;
+}
+
+/* Cacher Reset My Stats dans Play vs AI */
+body.mode-challenge:has(#challengeType option[value="free"]:checked)
+#resetChallengeDataBtn {
+  display: none !important;
+}
+
+/* =========================================
+   CHALLENGE - SHARE APP / RESTART
+========================================= */
+
+/* Play vs AI : cacher Share App */
+body.mode-challenge:has(#challengeType option[value="free"]:checked)
+#shareSiteBtn {
+  display: none !important;
+}
+
+/* Ranked Challenge : cacher Share App */
+body.mode-challenge:has(#challengeType option[value="ranked"]:checked)
+#shareSiteBtn {
+  display: none !important;
+}
+
+/* Ranked Challenge :
+   cacher Restart pendant la partie,
+   afficher seulement Play Again après la fin */
+body.mode-challenge:has(#challengeType option[value="ranked"]:checked)
+#reset {
+  display: none !important;
+}
+
+body.mode-challenge:has(#challengeType option[value="ranked"]:checked)
+#reset.play-again,
+body.mode-challenge:has(#challengeType option[value="ranked"]:checked)
+#reset.play-again-center {
+  display: inline-flex !important;
+}
+
+/* =========================================
+   CHALLENGE TOOLBAR — gauche / droite
+   ========================================= */
+
+body.mode-challenge #aiChallengePanel .challenge-toolbar {
+  width: 100% !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+}
+
+body.mode-challenge #aiChallengePanel .challenge-toolbar-right {
+  display: flex;
+  gap: 10px;
+  margin-left: auto !important;
+}
+
+/* =========================================
+   CHALLENGE TOOLBAR - POSITION FINALE
+   ========================================= */
+
+body.mode-challenge #aiChallengePanel {
+  width: var(--board-size) !important;
+  max-width: var(--board-size) !important;
+  margin: 10px auto 14px !important;
+  padding: 0 !important;
+  box-sizing: border-box;
+}
+
+body.mode-challenge #aiChallengePanel .challenge-toolbar {
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+body.mode-challenge #aiChallengePanel .challenge-toolbar-left,
+body.mode-challenge #aiChallengePanel .challenge-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin: 0 !important;
+}
+
+/* FIX FINAL - Challenge toolbar full width */
+body.mode-challenge #aiChallengePanel {
+  display: block !important;
+}
+
+body.mode-challenge #aiChallengePanel .challenge-toolbar {
+  display: flex !important;
+  width: 100% !important;
+  grid-column: 1 / -1 !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+}
+
+body.mode-challenge #aiChallengePanel .challenge-toolbar-left {
+  display: flex !important;
+  margin: 0 !important;
+}
+
+body.mode-challenge #aiChallengePanel .challenge-toolbar-right {
+  display: flex !important;
+  margin: 0 !important;
+  margin-left: auto !important;
+}
+
+/* =========================================
+   RANKED CHALLENGE - ATTIRER LE JOUEUR
+   uniquement pendant Play vs AI
+   ========================================= */
+
+body.mode-challenge:has(#challengeType option[value="free"]:checked)
+#challengeRankedBtn {
+  position: relative;
+  animation: rankedAttention 1.8s ease-in-out infinite;
+  box-shadow:
+    0 0 0 0 rgba(255, 193, 7, 0.55),
+    0 4px 12px rgba(255, 193, 7, 0.35);
+}
+
+body.mode-challenge:has(#challengeType option[value="free"]:checked)
+#challengeRankedBtn::after {
+  content: "🔥";
+  position: absolute;
+  top: -11px;
+  right: -8px;
+  font-size: 17px;
+}
+
+@keyframes rankedAttention {
+  0%, 100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.06);
+    box-shadow:
+      0 0 0 6px rgba(255, 193, 7, 0.12),
+      0 5px 16px rgba(255, 193, 7, 0.55);
+  }
 }
